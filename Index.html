@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raise a Ticket · 3SP</title>
+<style>
+  :root {
+    --primary: #1F4E79;
+    --teal: #2C7DA0;
+    --orange: #F47C2C;
+    --red-orange: #E94E1B;
+    --white: #FFFFFF;
+    --light-gray: #E6E6E6;
+    --bg: #F4F6F8;
+    --text: #212529;
+    --muted: #6C757D;
+    --border: #E0E4E8;
+    --success-bg: #C6EFCE;
+    --success-fg: #006100;
+    --error-bg: #F8CBAD;
+    --error-fg: #843C0C;
+    --warn-bg: #FFE699;
+    --warn-fg: #7F6000;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+  html, body { min-height: 100%; }
+  body {
+    background: linear-gradient(135deg, #1a3a5e 0%, var(--primary) 55%, var(--teal) 100%);
+    background-attachment: fixed;
+    color: var(--text);
+    font-size: 14px;
+    padding: 20px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  .container { width: 100%; max-width: 640px; margin: 30px auto; }
+  .brand { text-align: center; color: #fff; margin-bottom: 22px; }
+  .brand-logo { font-size: 40px; margin-bottom: 8px; filter: drop-shadow(0 4px 12px rgba(0,0,0,0.3)); }
+  .brand-name {
+    font-size: 40px; font-weight: 900; letter-spacing: -1.5px; line-height: 1;
+    margin-bottom: 6px; text-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+  .brand-star { color: var(--orange); margin: 0 -3px; }
+  .brand-tag {
+    font-size: 11px; font-weight: 600; letter-spacing: 3px;
+    text-transform: uppercase; opacity: 0.85;
+  }
+  .card {
+    background: var(--white); border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.18); overflow: hidden;
+  }
+  .card-header {
+    background: linear-gradient(135deg, var(--primary), var(--teal));
+    color: #fff; padding: 20px 24px;
+    border-bottom: 4px solid var(--orange);
+  }
+  .card-header h1 { font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
+  .card-header p { font-size: 12px; opacity: 0.85; margin-top: 4px; }
+  .card-body { padding: 22px 24px; }
+  .card-footer {
+    background: #FAFBFC; padding: 12px 24px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--muted); text-align: center;
+  }
+
+  .section-title {
+    font-size: 10px; font-weight: 800; color: var(--primary);
+    text-transform: uppercase; letter-spacing: 1.5px;
+    margin: 18px 0 10px; padding-bottom: 4px;
+    border-bottom: 2px solid var(--orange);
+  }
+  .section-title:first-of-type { margin-top: 0; }
+
+  .field { margin-bottom: 14px; }
+  label {
+    display: block; font-size: 11px; font-weight: 700; color: var(--primary);
+    text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 5px;
+  }
+  label .req { color: var(--red-orange); margin-left: 3px; }
+  .field-hint { font-size: 10px; color: var(--muted); margin-top: 3px; font-weight: 500; }
+  input[type=text], input[type=email], input[type=tel], input[type=number], input[type=date], select, textarea {
+    width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; background: var(--white);
+    font-family: inherit; transition: all 0.15s;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: none; border-color: var(--teal);
+    box-shadow: 0 0 0 3px rgba(44, 125, 160, 0.15);
+  }
+  textarea { min-height: 80px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) {
+    .row, .row-3 { grid-template-columns: 1fr; }
+  }
+  .field.hidden { display: none; }
+  .auto-badge {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    background: var(--warn-bg); color: var(--warn-fg);
+    padding: 2px 6px; border-radius: 8px; margin-left: 6px;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    vertical-align: middle;
+  }
+
+  .submit-btn {
+    width: 100%; background: linear-gradient(135deg, var(--orange), var(--red-orange));
+    color: #fff; border: none; padding: 14px; font-size: 14px;
+    font-weight: 800; letter-spacing: 1px; text-transform: uppercase;
+    border-radius: 8px; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(244, 124, 44, 0.35);
+    transition: all 0.15s; margin-top: 8px;
+  }
+  .submit-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(244, 124, 44, 0.5); }
+  .submit-btn:disabled { opacity: 0.6; cursor: wait; }
+
+  .status { padding: 11px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; }
+  .status.success { background: var(--success-bg); color: var(--success-fg); border-left: 4px solid var(--success-fg); }
+  .status.error { background: var(--error-bg); color: var(--error-fg); border-left: 4px solid var(--red-orange); }
+  .status.hidden { display: none; }
+  .status strong { display: block; margin-bottom: 3px; font-weight: 800; }
+
+  .success-screen { text-align: center; padding: 26px 20px; }
+  .success-screen .icon { font-size: 56px; margin-bottom: 12px; }
+  .success-screen h2 { color: var(--primary); font-size: 22px; margin-bottom: 6px; }
+  .success-screen p { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+  .success-screen .ticket-id {
+    display: inline-block; background: var(--primary); color: #fff;
+    font-weight: 800; padding: 8px 18px; border-radius: 6px;
+    font-size: 18px; letter-spacing: 1px; margin: 12px 0 8px;
+  }
+  .success-screen .success-details {
+    background: #f8f9fa; padding: 12px 16px; border-radius: 8px;
+    text-align: left; margin: 14px auto; max-width: 320px; font-size: 12px;
+  }
+  .success-screen .sd-row { display: flex; justify-content: space-between; padding: 3px 0; }
+  .success-screen .sd-row .lbl { color: var(--muted); }
+  .success-screen .sd-row .val { color: var(--primary); font-weight: 700; }
+  .success-screen .btn-again {
+    background: transparent; border: 2px solid var(--primary);
+    color: var(--primary); padding: 10px 22px; border-radius: 8px;
+    font-weight: 700; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 1px; cursor: pointer; transition: all 0.15s;
+    margin-top: 10px;
+  }
+  .success-screen .btn-again:hover { background: var(--primary); color: #fff; }
+
+  .loading { text-align: center; padding: 40px 20px; color: var(--muted); font-size: 12px; }
+  .loading .spinner {
+    display: inline-block; width: 24px; height: 24px;
+    border: 3px solid #e0e4e8; border-top-color: var(--teal);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+    margin-bottom: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="container">
+    <div class="brand">
+      <div class="brand-logo">🏗</div>
+      <div class="brand-name">3<span class="brand-star">★</span>SP</div>
+      <div class="brand-tag">Factory Support Portal</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h1>🎫 Raise a Ticket</h1>
+        <p>Report an issue, request a change, log an incident. Routed to the right department automatically.</p>
+      </div>
+      <div class="card-body" id="cardBody">
+        <div class="loading" id="loadingState">
+          <div class="spinner"></div>
+          <div>Loading form…</div>
+        </div>
+      </div>
+      <div class="card-footer">© 3 Star Projects · Bespoke Furniture & Interiors</div>
+    </div>
+  </div>
+
+  <script>
+    // ── STATE (loaded from server) ────────────────────────────────────────
+    let CONFIG = null;      // { categories, priorities, impacts }
+    let EMPLOYEES = [];     // [{name, department, role}]
+    let VENDORS = [];       // [{name, contact, category, phone, email}]
+    let PROJECTS = [];      // ["PRJ-001 — Sharma Residence", ...]
+    let loadedCount = 0;
+    const NEEDED_LOADS = 4;
+
+    document.addEventListener('DOMContentLoaded', function() {
+      google.script.run.withSuccessHandler(function(r) { CONFIG = r; onLoaded(); }).withFailureHandler(onFail).api_getTicketConfig();
+      google.script.run.withSuccessHandler(function(r) { EMPLOYEES = r || []; onLoaded(); }).withFailureHandler(onFail).api_getEmployees();
+      google.script.run.withSuccessHandler(function(r) { VENDORS = r || []; onLoaded(); }).withFailureHandler(onFail).api_getVendors();
+      google.script.run.withSuccessHandler(function(r) { PROJECTS = r || []; onLoaded(); }).withFailureHandler(onFail).api_getProjectLabels();
+    });
+    function onLoaded() {
+      loadedCount++;
+      if (loadedCount === NEEDED_LOADS) renderForm();
+    }
+    function onFail(err) {
+      document.getElementById('cardBody').innerHTML =
+        '<div class="status error"><strong>Could not load form</strong>' + escapeHTML(err && err.message ? err.message : 'Please refresh the page.') + '</div>';
+    }
+
+    // ── FORM RENDER ───────────────────────────────────────────────────────
+    function renderForm() {
+      const categories = Object.keys(CONFIG.categories);
+      const empOptions = EMPLOYEES.map(function(e) {
+        return '<option value="' + escapeHTML(e.name) + '">' + escapeHTML(e.name) + (e.department ? ' — ' + escapeHTML(e.department) : '') + '</option>';
+      }).join('');
+      const catOptions = categories.map(function(c) {
+        return '<option value="' + escapeHTML(c) + '">' + escapeHTML(c) + '</option>';
+      }).join('');
+      const priorityOptions = CONFIG.priorities.map(function(p) {
+        return '<option value="' + escapeHTML(p) + '">' + escapeHTML(p) + '</option>';
+      }).join('');
+      const impactOptions = CONFIG.impacts.map(function(p) {
+        return '<option value="' + escapeHTML(p) + '">' + escapeHTML(p) + '</option>';
+      }).join('');
+      const projectOptions = '<option value="">-- None --</option>' + PROJECTS.map(function(p) {
+        return '<option value="' + escapeHTML(p) + '">' + escapeHTML(p) + '</option>';
+      }).join('');
+      const vendorOptions = '<option value="">-- Select vendor --</option>' + VENDORS.map(function(v) {
+        return '<option value="' + escapeHTML(v.name) + '">' + escapeHTML(v.name) + (v.category ? ' — ' + escapeHTML(v.category) : '') + '</option>';
+      }).join('');
+
+      document.getElementById('cardBody').innerHTML =
+        '<div class="status hidden" id="status"></div>' +
+        '<form id="ticketForm" onsubmit="return submitTicket(event)">' +
+          '<div class="section-title">👤 Who is raising this?</div>' +
+          '<div class="field">' +
+            '<label for="raisedBy">Employee <span class="req">*</span></label>' +
+            '<select id="raisedBy" name="raisedBy" required onchange="onEmployeeChange()">' +
+              '<option value="">-- Select your name --</option>' + empOptions +
+            '</select>' +
+            '<div class="field-hint" id="raisedByHint">Not in list? Ask admin to add you to the People sheet.</div>' +
+          '</div>' +
+
+          '<div class="section-title">🎯 What is the issue?</div>' +
+          '<div class="field">' +
+            '<label for="category">Category <span class="req">*</span></label>' +
+            '<select id="category" name="category" required onchange="onCategoryChange()">' +
+              '<option value="">-- Select category --</option>' + catOptions +
+            '</select>' +
+          '</div>' +
+          '<div class="field">' +
+            '<label for="subject">Subject <span class="req">*</span></label>' +
+            '<input type="text" id="subject" name="subject" required maxlength="120" placeholder="Brief summary of the issue">' +
+          '</div>' +
+          '<div class="field">' +
+            '<label for="description">Description</label>' +
+            '<textarea id="description" name="description" placeholder="Provide details about the issue..."></textarea>' +
+          '</div>' +
+
+          '<div class="section-title" id="detailsTitle">📎 Additional Details</div>' +
+          '<div class="field hidden" id="relatedProjectWrap">' +
+            '<label for="relatedProject">Related Project</label>' +
+            '<select id="relatedProject" name="relatedProject">' + projectOptions + '</select>' +
+          '</div>' +
+          '<div class="field hidden" id="machineIdWrap">' +
+            '<label for="machineId">Machine / Equipment ID</label>' +
+            '<input type="text" id="machineId" name="machineId" placeholder="e.g. CNC-01, Edge Bander 2">' +
+          '</div>' +
+          '<div class="field hidden" id="batchCodeWrap">' +
+            '<label for="batchCode">Batch / Product Code</label>' +
+            '<input type="text" id="batchCode" name="batchCode" placeholder="e.g. BATCH-042, Item Code">' +
+          '</div>' +
+          '<div class="field hidden" id="vendorNameWrap">' +
+            '<label for="vendorName">Vendor</label>' +
+            '<select id="vendorName" name="vendorName">' + vendorOptions + '</select>' +
+          '</div>' +
+          '<div class="field hidden" id="drawingRevWrap">' +
+            '<label for="drawingRev">Drawing Revision</label>' +
+            '<input type="text" id="drawingRev" name="drawingRev" placeholder="e.g. DWG-101 Rev C">' +
+          '</div>' +
+          '<div class="field hidden" id="amountWrap">' +
+            '<label for="amount">Amount Involved (₹)</label>' +
+            '<input type="number" id="amount" name="amount" step="0.01" min="0" placeholder="0.00">' +
+          '</div>' +
+
+          '<div class="section-title">⚙️ Assignment & Priority</div>' +
+          '<div class="field">' +
+            '<label for="assignedTo">Assign To <span class="req">*</span></label>' +
+            '<select id="assignedTo" name="assignedTo" required>' +
+              '<option value="">-- Select person --</option>' + empOptions +
+            '</select>' +
+          '</div>' +
+          '<div class="row-3">' +
+            '<div class="field">' +
+              '<label for="priority">Priority <span class="auto-badge">auto</span></label>' +
+              '<select id="priority" name="priority">' + priorityOptions + '</select>' +
+            '</div>' +
+            '<div class="field">' +
+              '<label for="impact">Impact</label>' +
+              '<select id="impact" name="impact">' + impactOptions + '</select>' +
+            '</div>' +
+            '<div class="field">' +
+              '<label for="dueDate">Due Date <span class="auto-badge">auto</span></label>' +
+              '<input type="date" id="dueDate" name="dueDate">' +
+            '</div>' +
+          '</div>' +
+
+          '<div class="field">' +
+            '<label for="remarks">Additional Remarks</label>' +
+            '<textarea id="remarks" name="remarks" rows="2" placeholder="Anything else the assignee should know..."></textarea>' +
+          '</div>' +
+
+          '<button type="submit" class="submit-btn" id="submitBtn">Submit Ticket</button>' +
+        '</form>';
+    }
+
+    // ── FIELD BEHAVIOUR ───────────────────────────────────────────────────
+    function onEmployeeChange() {
+      // No auto-fill for the raiser's dept — server handles it. We just update hint.
+      const name = document.getElementById('raisedBy').value;
+      const emp = EMPLOYEES.filter(function(e) { return e.name === name; })[0];
+      const hint = document.getElementById('raisedByHint');
+      if (emp && emp.department) hint.textContent = 'Department: ' + emp.department + (emp.role ? ' · Role: ' + emp.role : '');
+      else hint.textContent = 'Not in list? Ask admin to add you to the People sheet.';
+    }
+
+    function onCategoryChange() {
+      const category = document.getElementById('category').value;
+      // Reset all optional field visibility
+      ['relatedProject','machineId','batchCode','vendorName','drawingRev','amount'].forEach(function(f) {
+        document.getElementById(f + 'Wrap').classList.add('hidden');
+      });
+      if (!category) {
+        document.getElementById('detailsTitle').style.display = 'none';
+        return;
+      }
+      document.getElementById('detailsTitle').style.display = '';
+      const cfg = CONFIG.categories[category];
+      if (!cfg) return;
+
+      // Show extra context fields required by this category
+      cfg.fields.forEach(function(f) {
+        const el = document.getElementById(f + 'Wrap');
+        if (el) el.classList.remove('hidden');
+      });
+
+      // Auto-fill priority + impact + due date
+      document.getElementById('priority').value = cfg.priority;
+      document.getElementById('impact').value = cfg.priority; // impact defaults to same as priority
+      const d = new Date();
+      d.setDate(d.getDate() + (cfg.dueDays || 0));
+      document.getElementById('dueDate').value = d.toISOString().slice(0, 10);
+    }
+
+    // ── SUBMIT ────────────────────────────────────────────────────────────
+    function submitTicket(e) {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const status = document.getElementById('status');
+      status.className = 'status hidden';
+
+      const data = {
+        raisedBy:       document.getElementById('raisedBy').value.trim(),
+        category:       document.getElementById('category').value,
+        subject:        document.getElementById('subject').value.trim(),
+        description:    document.getElementById('description').value.trim(),
+        assignedTo:     document.getElementById('assignedTo').value.trim(),
+        priority:       document.getElementById('priority').value,
+        impact:         document.getElementById('impact').value,
+        dueDate:        document.getElementById('dueDate').value,
+        relatedProject: document.getElementById('relatedProject').value,
+        machineId:      document.getElementById('machineId').value.trim(),
+        batchCode:      document.getElementById('batchCode').value.trim(),
+        vendorName:     document.getElementById('vendorName').value,
+        drawingRev:     document.getElementById('drawingRev').value.trim(),
+        amount:         document.getElementById('amount').value,
+        remarks:        document.getElementById('remarks').value.trim()
+      };
+      if (!data.raisedBy)   { showStatus('error', 'Missing info', 'Please select your name.'); return false; }
+      if (!data.category)   { showStatus('error', 'Missing info', 'Please pick a category.'); return false; }
+      if (!data.subject)    { showStatus('error', 'Missing info', 'Subject is required.'); return false; }
+      if (!data.assignedTo) { showStatus('error', 'Missing info', 'Please pick who to assign this to.'); return false; }
+
+      btn.disabled = true;
+      btn.textContent = 'Submitting…';
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          btn.disabled = false;
+          btn.textContent = 'Submit Ticket';
+          if (result && result.error) {
+            showStatus('error', 'Submission failed', result.message || result.error);
+            return;
+          }
+          if (result && result.success) {
+            showSuccessScreen(result);
+          }
+        })
+        .withFailureHandler(function(err) {
+          btn.disabled = false;
+          btn.textContent = 'Submit Ticket';
+          showStatus('error', 'Connection error', (err && err.message) ? err.message : 'Please try again.');
+        })
+        .api_submitTicket(data);
+      return false;
+    }
+
+    function showStatus(type, title, message) {
+      const status = document.getElementById('status');
+      status.className = 'status ' + type;
+      status.innerHTML = '<strong>' + escapeHTML(title) + '</strong>' + escapeHTML(message);
+      status.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function showSuccessScreen(result) {
+      document.getElementById('cardBody').innerHTML =
+        '<div class="success-screen">' +
+          '<div class="icon">✅</div>' +
+          '<h2>Ticket Submitted</h2>' +
+          '<p>Your ticket has been received.</p>' +
+          '<div class="ticket-id">' + escapeHTML(result.ticketId) + '</div>' +
+          '<div class="success-details">' +
+            '<div class="sd-row"><span class="lbl">Assigned to:</span><span class="val">' + escapeHTML(result.assignedTo) + '</span></div>' +
+            '<div class="sd-row"><span class="lbl">Priority:</span><span class="val">' + escapeHTML(result.priority) + '</span></div>' +
+            '<div class="sd-row"><span class="lbl">Due by:</span><span class="val">' + escapeHTML(result.dueDate) + '</span></div>' +
+          '</div>' +
+          '<p>Keep this ID for reference.</p>' +
+          '<button class="btn-again" onclick="location.reload()">Raise Another Ticket</button>' +
+        '</div>';
+    }
+
+    function escapeHTML(s) {
+      if (s === null || s === undefined) return '';
+      return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+  </script>
+</body>
+</html>
