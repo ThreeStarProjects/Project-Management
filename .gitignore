@@ -1,0 +1,9 @@
+# Local-only artifacts
+*.zip
+
+# Node (clasp)
+node_modules/
+
+# OS cruft
+.DS_Store
+Thumbs.db

@@ -1,0 +1,7 @@
+# clasp pushes everything NOT matched here. Default-ignore everything, then
+# un-ignore the extensions GAS accepts.
+**/**
+!appsscript.json
+!*.gs
+!*.html
+!*.json
