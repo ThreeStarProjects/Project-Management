@@ -57,7 +57,7 @@ function handleHardwareListEdit_(e) {
 
   const startCol = range.getColumn();
   const numCols  = range.getNumColumns();
-  if (startCol > 7 || startCol + numCols - 1 < 7) return;  // col G = Status
+  if (startCol > 8 || startCol + numCols - 1 < 8) return;  // col H = Status
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const purSheet = ss.getSheetByName(SHEETS.PURCHASES);
@@ -75,8 +75,8 @@ function handleHardwareListEdit_(e) {
  * Returns the new PUR-code, or null if skipped.
  */
 function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
-  const row = hwSheet.getRange(hwRow, 1, 1, 9).getValues()[0];
-  const [hwId, project, material, spec, qty, unit, status, /*remarks*/, pushed] = row;
+  const row = hwSheet.getRange(hwRow, 1, 1, 10).getValues()[0];
+  const [hwId, project, material, spec, qty, /*inStock*/, unit, status, /*remarks*/, pushed] = row;
   if (status !== 'Out of Stock') return null;
   if (pushed) return null;
   if (!hwId || !material) return null;
@@ -85,20 +85,20 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   const purCode = 'PUR-' + String(purNum).padStart(3, '0');
   const newRow = firstEmptyRow_(purSheet, 1);
 
-  // Purchases cols: A ID, B Project, C Material, D Spec, E Required, F Ordered, G Unit,
-  //                 H Vendor, I PO Issued (Y/N), J Expected, K Actual, L Variance (formula),
-  //                 M Status, N Remarks
+  // Purchases cols: A ID, B Project, C Material, D Spec, E Required, F In Stock (formula),
+  //                 G Ordered, H Unit, I Vendor, J PO Issued (Y/N), K Expected, L Actual,
+  //                 M Variance (formula), N Status, O Remarks
   purSheet.getRange(newRow, 1).setValue(purCode);
   purSheet.getRange(newRow, 2).setValue(project);
   purSheet.getRange(newRow, 3).setValue(material);
   purSheet.getRange(newRow, 4).setValue(spec || '');
   purSheet.getRange(newRow, 5).setValue(qty || '');
-  purSheet.getRange(newRow, 6).setValue(qty || '');  // Ordered defaults to Required
-  purSheet.getRange(newRow, 7).setValue(unit || '');
-  purSheet.getRange(newRow, 9).setValue('No');       // PO Issued default
-  purSheet.getRange(newRow, 13).setValue('Not Ordered');
-  purSheet.getRange(newRow, 14).setValue('From ' + hwId);
+  purSheet.getRange(newRow, 7).setValue(qty || '');  // Ordered defaults to Required
+  purSheet.getRange(newRow, 8).setValue(unit || '');
+  purSheet.getRange(newRow, 10).setValue('No');      // PO Issued default
+  purSheet.getRange(newRow, 14).setValue('Not Ordered');
+  purSheet.getRange(newRow, 15).setValue('From ' + hwId);
 
-  hwSheet.getRange(hwRow, 9).setValue(purCode);
+  hwSheet.getRange(hwRow, 10).setValue(purCode);
   return purCode;
 }

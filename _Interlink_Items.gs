@@ -1,29 +1,48 @@
 /**
  * _Interlink_Items.gs  (v0.4 Phase 3)
  * -----------------------------------------------------------------------------
- * Hardware List ← IMS items. Additive only: appends cols J/K to Hardware List
- * and adds a hidden helper sheet. No existing PM code is modified.
+ * IMS items on Hardware List and Purchases.
  *
  *   _IMS_Items (hidden)  IMPORTRANGE of IMS Item Master + SFG Master + stock
- *   Hardware List J      Item Code dropdown (label list from _IMS_Items)
- *   Hardware List K      In Stock (IMS) = Available − Reserved, live formula
+ *   C Material           dropdown of IMS items (warn-only: free text still allowed)
+ *   F In Stock (IMS)     Available − Reserved, one plain formula per row
  *
- * Picking a code in J fills Material (C) and Unit (F) only if they're blank.
+ * Both sheets get the same new column F (right after Required Qty); everything
+ * from the old F onward moves one column right:
+ *   Hardware List: A ID | B Project | C Material | D Spec | E Req Qty | F In Stock |
+ *                  G Unit | H Status | I Remarks | J Pushed to Purchases
+ *   Purchases:     A ID | B Project | C Material | D Spec | E Req Qty | F In Stock |
+ *                  G Ordered | H Unit | I Vendor | J PO Issued | K Expected | L Actual |
+ *                  M Variance | N Status | O Remarks
+ * Picking an item in C fills Unit (G on Hardware, H on Purchases) if blank.
  *
- * One-time: run IM_installItems() from the editor, then open _IMS_Items,
- * click A2 and press "Allow access" (IMPORTRANGE needs it once).
+ * Rollout (push the code, then straight away, from the editor):
+ *   1. IM_installItems()   idempotent; inserts col F in the live sheets (native
+ *                          insert shifts existing formulas / validations / colours),
+ *                          then re-seeds ARRAYFORMULAs from the updated code.
+ *   2. Open _IMS_Items (View → Hidden sheets), click A2, press "Allow access".
+ *   3. IM_verifyWiring()   PASS/FAIL list for every rewired reference.
  * Re-run IM_installItems() after "Create/Rebuild Hardware List Sheet".
  */
 
 var IM_IMS_SHEET_ID = '1CglvPxUWZnIHNeToGEDz8-Xj3eNfvaF351j_ogpRTgk';
 var IM_ITEMS_SHEET  = '_IMS_Items';
-var IM_HW_ITEM_COL  = 10;  // J
-var IM_HW_STOCK_COL = 11;  // K
+var IM_MAT_COL      = 3;   // C
+var IM_STOCK_COL    = 6;   // F
+var IM_STOCK_HDR    = 'In Stock (IMS)';
+
+/** Sheets that carry the Material dropdown + In Stock column, and where their Unit lives. */
+function IM_itemSheets_() {
+  return [
+    { name: SHEETS.HARDWARE,  unitCol: 7 },
+    { name: SHEETS.PURCHASES, unitCol: 8 }
+  ];
+}
 
 function IM_installItems() {
   var ss = SpreadsheetApp.getActive();
-  var hw = ss.getSheetByName(SHEETS.HARDWARE);
-  if (!hw) { SpreadsheetApp.getUi().alert('Hardware List sheet not found.'); return; }
+  var targets = IM_itemSheets_().filter(function (t) { return ss.getSheetByName(t.name); });
+  if (!targets.length) { IM_say_('Hardware List / Purchases sheets not found.'); return; }
 
   // --- helper sheet ---------------------------------------------------------
   var it = ss.getSheetByName(IM_ITEMS_SHEET) || ss.insertSheet(IM_ITEMS_SHEET);
@@ -31,7 +50,8 @@ function IM_installItems() {
   var id = IM_IMS_SHEET_ID;
   it.getRange('A1:E1').setValues([['Code', 'Label', 'UOM', 'Item Name', 'Net Stock']]);
   it.getRange('H1:I1').setValues([['Stock Code', 'Stock Net']]);
-  // Items + SFGs (Active? filter removed: errored on IMS data; ponytail: add back once column type known). Search Label = Item Master T / SFG Master N.
+  // Items + SFGs. Search Label = Item Master T / SFG Master N.
+  // ponytail: no Active? filter (errored on IMS data); inactive items show. Add back once column type is known.
   it.getRange('A2').setFormula(
     '={QUERY(IMPORTRANGE("' + id + '","Item Master!A2:T"),"select Col1,Col20,Col7,Col4 where Col1 is not null",0);' +
     'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:N"),"select Col1,Col14,Col7,Col4 where Col1 is not null",0)}');
@@ -42,22 +62,37 @@ function IM_installItems() {
   it.getRange('E2').setFormula('=ARRAYFORMULA(IF(A2:A="","",IFERROR(VLOOKUP(A2:A,H:I,2,FALSE),0)))');
   it.hideSheet();
 
-  // --- Hardware List cols J/K -----------------------------------------------
-  var hdr = hw.getRange(1, IM_HW_ITEM_COL, 1, 2);
-  hdr.setValues([['Item Code (IMS)', 'In Stock (IMS)']])
-     .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG)
-     .setFontWeight('bold').setFontSize(11)
-     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
-  hw.setColumnWidth(IM_HW_ITEM_COL, 260);
-  hw.setColumnWidth(IM_HW_STOCK_COL, 110);
-
+  // --- per-sheet column migration -----------------------------------------
   var rule = SpreadsheetApp.newDataValidation()
     .requireValueInRange(it.getRange('B2:B5000'), true)
-    .setAllowInvalid(false).build();
-  hw.getRange(2, IM_HW_ITEM_COL, MAX_ROWS - 1, 1).setDataValidation(rule);
+    .setAllowInvalid(true).build();  // warn-only so free-text materials still work
 
-  hw.getRange(2, IM_HW_STOCK_COL).setFormula(
-    '=ARRAYFORMULA(IF(J2:J="","",IFERROR(VLOOKUP(J2:J,' + IM_ITEMS_SHEET + '!B:E,4,FALSE),"n/a")))');
+  targets.forEach(function (t) {
+    var sh = ss.getSheetByName(t.name);
+    if (sh.getRange(1, IM_STOCK_COL).getValue() !== IM_STOCK_HDR) {
+      // earlier Phase 3 attempt put Item Code / In Stock in J:K of Hardware List
+      if (t.name === SHEETS.HARDWARE && sh.getRange(1, 10).getValue() === 'Item Code (IMS)') sh.deleteColumns(10, 2);
+      sh.insertColumnAfter(IM_STOCK_COL - 1);  // new F; native insert shifts formulas/validations/CF
+    }
+    sh.getRange(1, IM_STOCK_COL).setValue(IM_STOCK_HDR)
+      .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG)
+      .setFontWeight('bold').setFontSize(11)
+      .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+    sh.setColumnWidth(IM_STOCK_COL, 110);
+
+    // F: one plain formula per row (survives row deletes and the Purchases import)
+    var f = [];
+    for (var r = 2; r <= MAX_ROWS; r++) {
+      f.push(['=IF($C' + r + '="","",IFERROR(VLOOKUP($C' + r + ',' + IM_ITEMS_SHEET + '!$B:$E,4,FALSE),"n/a"))']);
+    }
+    sh.getRange(2, IM_STOCK_COL, MAX_ROWS - 1, 1).setFormulas(f).setHorizontalAlignment('center');
+    sh.getRange(2, IM_MAT_COL, MAX_ROWS - 1, 1).setDataValidation(rule);
+  });
+
+  // Re-seed the ARRAYFORMULA cells (Purchases M2 etc.) from the updated code so they
+  // are canonical, not just natively shifted. Project View / Dashboard cells are
+  // checked by IM_verifyWiring().
+  reseedArrayFormulas_(ss);
 
   // --- autofill trigger (separate from the existing onEditHandler) ---------
   ScriptApp.getProjectTriggers().forEach(function (t) {
@@ -65,35 +100,96 @@ function IM_installItems() {
   });
   ScriptApp.newTrigger('IM_onHardwareItemEdit_').forSpreadsheet(ss).onEdit().create();
 
-  var msg = 'Now open the hidden "' + IM_ITEMS_SHEET + '" sheet (View → Hidden sheets), click A2 and press "Allow access".';
-  try { SpreadsheetApp.getUi().alert('Items wired', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
-  catch (e) { Logger.log('Items wired. ' + msg); }  // run from editor: no UI context
+  IM_say_('Columns inserted. Now open the hidden "' + IM_ITEMS_SHEET + '" sheet (View → Hidden sheets), ' +
+          'click A2 and press "Allow access". Then run IM_verifyWiring().');
 }
 
-/** Item Code picked in J → fill Material (C) and Unit (F) if blank. */
+function IM_say_(msg) {
+  try { SpreadsheetApp.getUi().alert('Items', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
+  catch (e) { Logger.log(msg); }  // run from editor: no UI context
+}
+
+/** Item picked in Material (C) → fill Unit if blank (Hardware List G, Purchases H). */
 function IM_onHardwareItemEdit_(e) {
   try {
     if (!e || !e.range) return;
     var r = e.range, sh = r.getSheet();
-    if (sh.getName() !== SHEETS.HARDWARE || r.getRow() < 2) return;
-    if (r.getColumn() !== IM_HW_ITEM_COL || r.getNumRows() !== 1) return;
+    var t = IM_itemSheets_().filter(function (x) { return x.name === sh.getName(); })[0];
+    if (!t || r.getRow() < 2) return;
+    if (r.getColumn() !== IM_MAT_COL || r.getNumRows() !== 1) return;
     var label = String(r.getValue());
     if (!label) return;
 
     var rows = e.source.getSheetByName(IM_ITEMS_SHEET).getRange('A2:D').getValues();
     var m = rows.filter(function (x) { return x[1] === label; })[0];
-    if (!m) return;
+    if (!m) return;  // free-text material
 
-    var row = r.getRow();
-    if (!sh.getRange(row, 3).getValue()) sh.getRange(row, 3).setValue(m[3]);   // Material ← Item Name
     // IMS UOM → PM Unit dropdown value; unmapped UOMs (e.g. Liters) are left for the user.
     var uomMap = { 'no.s': 'Pcs', 'nos': 'Pcs', 'pcs': 'Pcs', 'kilograms': 'Kg', 'kg': 'Kg',
                    'meters': 'Meter', 'meter': 'Meter', 'sets': 'Set', 'set': 'Set',
                    'boxes': 'Box', 'box': 'Box', 'rolls': 'Roll', 'roll': 'Roll',
                    'sq.ft': 'Sq.ft', 'sq.m': 'Sq.m' };
     var u = uomMap[String(m[2]).toLowerCase()];
-    if (u && !sh.getRange(row, 6).getValue()) sh.getRange(row, 6).setValue(u);
+    var cell = sh.getRange(r.getRow(), t.unitCol);
+    if (u && !cell.getValue()) cell.setValue(u);
   } catch (err) {
     Logger.log('IM_onHardwareItemEdit_ error: ' + err.message);
   }
+}
+
+// -----------------------------------------------------------------------------
+// Wiring check — run after IM_installItems(). Logs one PASS/FAIL line per check.
+// -----------------------------------------------------------------------------
+function IM_verifyWiring() {
+  var ss = SpreadsheetApp.getActive();
+  var out = [];
+  var check = function (label, ok) { out.push((ok ? 'PASS  ' : 'FAIL  ') + label); };
+  var hdr = function (sheet, col) {
+    var sh = ss.getSheetByName(sheet);
+    return sh ? String(sh.getRange(1, col).getValue()) : '(missing sheet)';
+  };
+  var dvHas = function (sheet, a1, value) {
+    var sh = ss.getSheetByName(sheet);
+    var dv = sh && sh.getRange(a1).getDataValidation();
+    var vals = dv ? dv.getCriteriaValues()[0] : null;
+    return Array.isArray(vals) && vals.indexOf(value) >= 0;
+  };
+
+  var H = SHEETS.HARDWARE, P = SHEETS.PURCHASES;
+  [[H, 5, 'Required Qty'], [H, 6, IM_STOCK_HDR], [H, 7, 'Unit'], [H, 8, 'Status'], [H, 10, 'Pushed to Purchases'],
+   [P, 5, 'Required Qty'], [P, 6, IM_STOCK_HDR], [P, 7, 'Ordered Qty'], [P, 8, 'Unit'], [P, 9, 'Vendor'],
+   [P, 10, 'PO Issued'], [P, 11, 'Expected Delivery'], [P, 12, 'Actual Delivery'], [P, 13, 'Variance (Days)'],
+   [P, 14, 'Status'], [P, 15, 'Remarks']
+  ].forEach(function (c) { check(c[0] + ' header col ' + c[1] + ' = ' + c[2], hdr(c[0], c[1]) === c[2]); });
+
+  var pur = ss.getSheetByName(P);
+  var mf = pur ? pur.getRange('M2').getFormula() : '';
+  check('Purchases M2 variance = L − K', mf.indexOf('L2:L-K2:K') >= 0 && mf.indexOf('K2:K=""') >= 0);
+
+  check('Hardware H (Status) dropdown', dvHas(H, 'H2', 'Out of Stock'));
+  check('Hardware G (Unit) dropdown',   dvHas(H, 'G2', 'Pcs'));
+  check('Purchases N (Status) dropdown', dvHas(P, 'N2', 'Delivered'));
+  check('Purchases J (PO Issued) dropdown', dvHas(P, 'J2', 'Yes'));
+  check('Purchases H (Unit) dropdown',   dvHas(P, 'H2', 'Pcs'));
+
+  var pv = ss.getSheetByName(SHEETS.VIEW);
+  if (pv) {
+    var fs = pv.getRange(1, 1, 70, 5).getFormulas();
+    var flat = [].concat.apply([], fs).filter(String);
+    check('Project View: no formula still reads Purchases!M:M',
+          !flat.some(function (f) { return /Purchases'?!M:M/.test(f); }));
+    check('Project View: Delivered count reads Purchases!N:N',
+          flat.some(function (f) { return /Purchases'?!N:N/.test(f) && f.indexOf('Delivered') >= 0; }));
+    var a59 = pv.getRange('A59').getFormula();
+    check('Project View A59 query uses G2:H, I2:I, N2:N',
+          a59.indexOf('G2:H') >= 0 && a59.indexOf('I2:I') >= 0 && a59.indexOf('N2:N') >= 0);
+  }
+
+  var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+  check('trigger onEditHandler installed',          handlers.indexOf('onEditHandler') >= 0);
+  check('trigger IM_onHardwareItemEdit_ installed', handlers.indexOf('IM_onHardwareItemEdit_') >= 0);
+
+  Logger.log(out.join('\n'));
+  IM_say_(out.join('\n'));
+  return out;
 }

@@ -205,12 +205,12 @@ function importPurchasesIntoHardwareList() {
   const purLast = purSheet.getLastRow();
   if (purLast < 2) { ui.alert('No purchases to import.'); return; }
 
-  const purData = purSheet.getRange(2, 1, purLast - 1, 7).getValues();
+  const purData = purSheet.getRange(2, 1, purLast - 1, 8).getValues();
 
   const alreadyPushed = new Set();
   const hwLast = hwSheet.getLastRow();
   if (hwLast >= 2) {
-    hwSheet.getRange(2, 9, hwLast - 1, 1).getValues().forEach(r => {
+    hwSheet.getRange(2, 10, hwLast - 1, 1).getValues().forEach(r => {
       if (r[0]) alreadyPushed.add(String(r[0]));
     });
   }
@@ -219,12 +219,12 @@ function importPurchasesIntoHardwareList() {
   const toInsert = [];
   let skipped = 0;
   for (const p of purData) {
-    const [purCode, project, material, spec, reqQty, ordQty, unit] = p;
+    const [purCode, project, material, spec, reqQty, /*inStock*/, ordQty, unit] = p;
     if (!purCode || !material) continue;
     if (alreadyPushed.has(String(purCode))) { skipped++; continue; }
     const hwCode = 'HW-' + String(nextHwNum++).padStart(3, '0');
     const qty = (reqQty !== '' && reqQty !== null) ? reqQty : ordQty;
-    toInsert.push([hwCode, project, material, spec, qty, unit, 'Out of Stock', 'Imported from ' + purCode, purCode]);
+    toInsert.push([hwCode, project, material, spec, qty, unit, 'Out of Stock', 'Imported from ' + purCode, purCode]);  // A-E, G-J (F = formula)
   }
 
   if (toInsert.length === 0) {
@@ -241,7 +241,9 @@ function importPurchasesIntoHardwareList() {
   if (confirm !== ui.Button.YES) return;
 
   const startRow = firstEmptyRow_(hwSheet, 1);
-  hwSheet.getRange(startRow, 1, toInsert.length, 9).setValues(toInsert);
+  // F (In Stock) is a formula column — write A:E and G:J around it.
+  hwSheet.getRange(startRow, 1, toInsert.length, 5).setValues(toInsert.map(r => r.slice(0, 5)));
+  hwSheet.getRange(startRow, 7, toInsert.length, 4).setValues(toInsert.map(r => r.slice(5)));
   ui.alert('✅ Imported ' + toInsert.length + ' row(s). Skipped: ' + skipped + '.');
 }
 
@@ -278,8 +280,8 @@ function reseedArrayFormulas_(ss) {
     `=ARRAYFORMULA(IFERROR(VLOOKUP(A2:A, {${PR}!I:I, ${PR}!B:B}, 2, FALSE), ""))`
   );
   const pur = ss.getSheetByName(SHEETS.PURCHASES);
-  if (pur) pur.getRange('L2').setFormula(
-    `=ARRAYFORMULA(IF(OR(J2:J="",K2:K=""),"",IFERROR(K2:K-J2:J,"")))`
+  if (pur) pur.getRange('M2').setFormula(
+    `=ARRAYFORMULA(IF(OR(K2:K="",L2:L=""),"",IFERROR(L2:L-K2:K,"")))`
   );
   const prod = ss.getSheetByName(SHEETS.PRODUCTION);
   if (prod) {

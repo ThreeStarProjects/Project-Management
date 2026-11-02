@@ -109,10 +109,11 @@ function createHardwareListSheet_(ss) {
     'Material',             // C
     'Specification',        // D
     'Required Qty',         // E
-    'Unit',                 // F  dropdown
-    'Status',               // G  In Stock / Out of Stock — flip drives push to Purchases
-    'Remarks',              // H
-    'Pushed to Purchases'   // I  trigger stamps PUR-code; prevents duplicate push
+    'In Stock (IMS)',       // F  per-row formula, see _Interlink_Items.gs
+    'Unit',                 // G  dropdown
+    'Status',               // H  In Stock / Out of Stock — flip drives push to Purchases
+    'Remarks',              // I
+    'Pushed to Purchases'   // J  trigger stamps PUR-code; prevents duplicate push
   ];
   sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   sh.setFrozenRows(1);
@@ -120,9 +121,9 @@ function createHardwareListSheet_(ss) {
 
   sh.setColumnWidth(1, 90);   sh.setColumnWidth(2, 200);
   sh.setColumnWidth(3, 200);  sh.setColumnWidth(4, 200);
-  sh.setColumnWidth(5, 100);  sh.setColumnWidth(6, 90);
-  sh.setColumnWidth(7, 110);  sh.setColumnWidth(8, 220);
-  sh.setColumnWidth(9, 120);
+  sh.setColumnWidth(5, 100);  sh.setColumnWidth(6, 110);
+  sh.setColumnWidth(7, 90);   sh.setColumnWidth(8, 110);
+  sh.setColumnWidth(9, 220);  sh.setColumnWidth(10, 120);
 }
 
 function createPurchasesSheet_(ss) {
@@ -133,25 +134,26 @@ function createPurchasesSheet_(ss) {
     'Material',         // C
     'Specification',    // D
     'Required Qty',     // E
-    'Ordered Qty',      // F
-    'Unit',             // G
-    'Vendor',           // H  dropdown from Vendors
-    'PO Issued',        // I  Yes / No dropdown
-    'Expected Delivery',// J  date
-    'Actual Delivery',  // K  date
-    'Variance (Days)',  // L  ARRAYFORMULA = Actual - Expected (moved beside Actual)
-    'Status',           // M  Not Ordered / PO Issued / In Transit / Delivered / Rejected / On Hold
-    'Remarks'           // N
+    'In Stock (IMS)',   // F  per-row formula, see _Interlink_Items.gs
+    'Ordered Qty',      // G
+    'Unit',             // H
+    'Vendor',           // I  dropdown from Vendors
+    'PO Issued',        // J  Yes / No dropdown
+    'Expected Delivery',// K  date
+    'Actual Delivery',  // L  date
+    'Variance (Days)',  // M  ARRAYFORMULA = Actual - Expected (moved beside Actual)
+    'Status',           // N  Not Ordered / PO Issued / In Transit / Delivered / Rejected / On Hold
+    'Remarks'           // O
   ];
   sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   sh.setFrozenRows(1);
   sh.setFrozenColumns(1);
 
-  sh.getRange('L2').setFormula(`=ARRAYFORMULA(IF(OR(J2:J="",K2:K=""),"",IFERROR(K2:K-J2:J,"")))`);
+  sh.getRange('M2').setFormula(`=ARRAYFORMULA(IF(OR(K2:K="",L2:L=""),"",IFERROR(L2:L-K2:K,"")))`);
 
-  sh.getRange('J:K').setNumberFormat('dd/mm/yyyy');
+  sh.getRange('K:L').setNumberFormat('dd/mm/yyyy');
   sh.setColumnWidth(1, 90); sh.setColumnWidth(2, 200); sh.setColumnWidth(3, 200);
-  sh.setColumnWidth(4, 200); sh.setColumnWidth(8, 180); sh.setColumnWidth(14, 220);
+  sh.setColumnWidth(4, 200); sh.setColumnWidth(6, 110); sh.setColumnWidth(9, 180); sh.setColumnWidth(15, 220);
 }
 
 function createProductionSheet_(ss) {
@@ -293,7 +295,7 @@ function createProjectViewSheet_(ss) {
     ['Installation:',  idx('P'), '', '', ''],
     ['', '', '', '', ''],
     ['── COUNTS (per project) ──', '', '', '', ''],
-    ['Purchases:',    `=COUNTIF('${SHEETS.PURCHASES}'!B:B,$B$3)`,  '', 'Delivered:', `=COUNTIFS('${SHEETS.PURCHASES}'!B:B,$B$3,'${SHEETS.PURCHASES}'!M:M,"Delivered")`],
+    ['Purchases:',    `=COUNTIF('${SHEETS.PURCHASES}'!B:B,$B$3)`,  '', 'Delivered:', `=COUNTIFS('${SHEETS.PURCHASES}'!B:B,$B$3,'${SHEETS.PURCHASES}'!N:N,"Delivered")`],
     ['Production Items:', `=COUNTIF('${SHEETS.PRODUCTION}'!B:B,$B$3)`, '', 'Completed:', `=COUNTIFS('${SHEETS.PRODUCTION}'!B:B,$B$3,'${SHEETS.PRODUCTION}'!M:M,"Completed")`],
     ['Snags Total:',  `=COUNTIF('${SHEETS.SNAGS}'!B:B,$B$3)`,      '', 'Snags Open:',  `=COUNTIFS('${SHEETS.SNAGS}'!B:B,$B$3,'${SHEETS.SNAGS}'!G:G,"Open")`],
     ['Tickets Total:',`=COUNTIF('${SHEETS.TICKETS}'!K:K,$B$3)`,    '', 'Tickets Open:',`=COUNTIFS('${SHEETS.TICKETS}'!K:K,$B$3,'${SHEETS.TICKETS}'!I:I,"Open")`]
@@ -313,9 +315,9 @@ function createProjectViewSheet_(ss) {
   // Purchases detail for the selected project (row 58+)
   sh.getRange('A58').setValue('── PURCHASES FOR THIS PROJECT ──');
   const PU = SHEETS.PURCHASES;
-  // Purchases cols: A ID, B Project, C Material, D Spec, F Ordered Qty, G Unit, H Vendor, M Status
+  // Purchases cols: A ID, B Project, C Material, D Spec, G Ordered Qty, H Unit, I Vendor, N Status
   sh.getRange('A59').setFormula(
-    `=IF($B$3="","(pick a project in B3)",IFERROR(QUERY({'${PU}'!A2:D,'${PU}'!F2:G,'${PU}'!H2:H,'${PU}'!M2:M}, "SELECT Col1, Col3, Col4, Col5, Col6, Col7, Col8 WHERE Col2='"&$B$3&"' LABEL Col1 'ID', Col3 'Material', Col4 'Spec', Col5 'Qty', Col6 'Unit', Col7 'Vendor', Col8 'Status'", 1), "No purchases yet for this project"))`
+    `=IF($B$3="","(pick a project in B3)",IFERROR(QUERY({'${PU}'!A2:D,'${PU}'!G2:H,'${PU}'!I2:I,'${PU}'!N2:N}, "SELECT Col1, Col3, Col4, Col5, Col6, Col7, Col8 WHERE Col2='"&$B$3&"' LABEL Col1 'ID', Col3 'Material', Col4 'Spec', Col5 'Qty', Col6 'Unit', Col7 'Vendor', Col8 'Status'", 1), "No purchases yet for this project"))`
   );
 
   // Formats
@@ -402,16 +404,16 @@ function installDataValidations() {
 
   // Hardware List
   if (proj) dd(SHEETS.HARDWARE, `B2:B${R}`, proj);
-  dd(SHEETS.HARDWARE, `F2:F${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
-  dd(SHEETS.HARDWARE, `G2:G${R}`, ['In Stock','Out of Stock']);
+  dd(SHEETS.HARDWARE, `G2:G${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
+  dd(SHEETS.HARDWARE, `H2:H${R}`, ['In Stock','Out of Stock']);
 
   // Purchases (Invoice# + Amount removed; PO Issued now Y/N; Variance moved; Status now col M)
   if (proj) dd(SHEETS.PURCHASES, `B2:B${R}`, proj);
-  dd(SHEETS.PURCHASES, `G2:G${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
-  if (ven) dd(SHEETS.PURCHASES, `H2:H${R}`, ven);
-  dd(SHEETS.PURCHASES, `I2:I${R}`, ['Yes','No']);
-  dd(SHEETS.PURCHASES, `M2:M${R}`, ['Not Ordered','PO Issued','In Transit','Delivered','Rejected','On Hold']);
-  date(SHEETS.PURCHASES, `J2:K${R}`);
+  dd(SHEETS.PURCHASES, `H2:H${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
+  if (ven) dd(SHEETS.PURCHASES, `I2:I${R}`, ven);
+  dd(SHEETS.PURCHASES, `J2:J${R}`, ['Yes','No']);
+  dd(SHEETS.PURCHASES, `N2:N${R}`, ['Not Ordered','PO Issued','In Transit','Delivered','Rejected','On Hold']);
+  date(SHEETS.PURCHASES, `K2:L${R}`);
 
   // Production (Category/Room is now free text; cols reshuffled)
   if (proj) dd(SHEETS.PRODUCTION, `B2:B${R}`, proj);
@@ -474,8 +476,8 @@ function installFormatting() {
   };
   base(SHEETS.PROJECTS,   17);
   base(SHEETS.MILESTONES, 27);
-  base(SHEETS.HARDWARE,   9);
-  base(SHEETS.PURCHASES,  14);
+  base(SHEETS.HARDWARE,   10);
+  base(SHEETS.PURCHASES,  15);
   base(SHEETS.PRODUCTION, 14);
   base(SHEETS.SNAGS,      13);
   base(SHEETS.TICKETS,    23);
@@ -569,20 +571,20 @@ function applyAllCF_(ss) {
     ['No',  COLORS.BAD_BG,  COLORS.BAD_FG],
     ['Pending', COLORS.PENDING_BG, COLORS.PENDING_FG]
   ]));
-  // Hardware List: Status (G)
+  // Hardware List: Status (H)
   sh = ss.getSheetByName(SHEETS.HARDWARE);
-  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(`G2:G${R}`), [
+  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(`H2:H${R}`), [
     ['In Stock',     COLORS.DONE_BG, COLORS.DONE_FG],
     ['Out of Stock', COLORS.BAD_BG,  COLORS.BAD_FG]
   ]));
-  // Purchases: PO Issued (I), Status (M)
+  // Purchases: PO Issued (J), Status (N)
   sh = ss.getSheetByName(SHEETS.PURCHASES);
   if (sh) sh.setConditionalFormatRules([
-    ...cfRules_(sh.getRange(`I2:I${R}`), [
+    ...cfRules_(sh.getRange(`J2:J${R}`), [
       ['Yes', COLORS.DONE_BG, COLORS.DONE_FG],
       ['No',  COLORS.PENDING_BG, COLORS.PENDING_FG]
     ]),
-    ...cfRules_(sh.getRange(`M2:M${R}`), [
+    ...cfRules_(sh.getRange(`N2:N${R}`), [
       ['Delivered',   COLORS.DONE_BG,     COLORS.DONE_FG],
       ['In Transit',  COLORS.PROGRESS_BG, COLORS.PROGRESS_FG],
       ['PO Issued',   COLORS.PROGRESS_BG, COLORS.PROGRESS_FG],
@@ -655,8 +657,8 @@ function applyAllCF_(ss) {
 function applyProjectColorBands_(ss) {
   const targets = [
     [SHEETS.MILESTONES, 'A', 'AA'],
-    [SHEETS.HARDWARE,   'B', 'I'],
-    [SHEETS.PURCHASES,  'B', 'N'],  // was P (16); now N (14) after Invoice#/Amount removed
+    [SHEETS.HARDWARE,   'B', 'J'],
+    [SHEETS.PURCHASES,  'B', 'O'],  // O (15) after In Stock (IMS) was added
     [SHEETS.PRODUCTION, 'B', 'N'],
     [SHEETS.SNAGS,      'B', 'M'],
     [SHEETS.TICKETS,    'K', 'W']   // K = Related Project
