@@ -130,6 +130,7 @@ function IM_onOpen_() {
     .addSeparator()
     .addItem('About',                          'IM_about_')
     .addToUi();
+  try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col K current on open
 }
 
 function IM_about_() {

@@ -125,7 +125,8 @@ function IM_onHardwareItemEdit_(e) {
     if (!m) return;  // free-text material
 
     // IMS UOM → PM Unit dropdown value; unmapped UOMs (e.g. Liters) are left for the user.
-    var uomMap = { 'no.s': 'Pcs', 'nos': 'Pcs', 'pcs': 'Pcs', 'kilograms': 'Kg', 'kg': 'Kg',
+    var uomMap = { 'no.s': 'Pcs', 'nos': 'Pcs', 'pcs': 'Pcs', 'units': 'Pcs', 'unit': 'Pcs',
+                   'pieces': 'Pcs', 'piece': 'Pcs', 'kilograms': 'Kg', 'kg': 'Kg',
                    'meters': 'Meter', 'meter': 'Meter', 'sets': 'Set', 'set': 'Set',
                    'boxes': 'Box', 'box': 'Box', 'rolls': 'Roll', 'roll': 'Roll',
                    'sq.ft': 'Sq.ft', 'sq.m': 'Sq.m' };

@@ -84,7 +84,7 @@ function IM_reserveSelected() {
 }
 
 /** Pull Done / Error results from the IMS queue back onto Hardware List col K. */
-function IM_refreshReservationStatus() {
+function IM_refreshReservationStatus(quiet) {  // quiet = from onOpen: no toast unless something changed
   var ss = SpreadsheetApp.getActive();
   var hw = ss.getSheetByName(SHEETS.HARDWARE);
   if (!hw || hw.getLastRow() < 2) return;
@@ -104,5 +104,5 @@ function IM_refreshReservationStatus() {
       r[7] === 'Done' ? r[8] + ' | reserved ' + m[2] : '⚠ ' + (r[10] || 'IMS error'));
     changed++;
   });
-  ss.toast(changed ? 'Updated ' + changed + ' reservation(s).' : 'No new results yet.', '🔗 Interlink', 5);
+  if (changed || !quiet) ss.toast(changed ? 'Updated ' + changed + ' reservation(s).' : 'No new results yet.', '🔗 Interlink', 5);
 }
