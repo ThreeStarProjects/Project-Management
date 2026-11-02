@@ -46,7 +46,7 @@ function handleAutoIdGeneration_(e) {
 
 /**
  * When a Hardware List row's Status flips to "Out of Stock", push it into Purchases.
- * One-way. No re-push if already pushed (col J holds the PUR-code).
+ * One-way. No re-push if already pushed (col K holds the PUR-code).
  * For IMS items only the shortfall (Required − reserved/in stock) is pushed.
  * No sync of subsequent edits to Purchases (avoids clobbering procurement work).
  */
@@ -58,7 +58,7 @@ function handleHardwareListEdit_(e) {
 
   const startCol = range.getColumn();
   const numCols  = range.getNumColumns();
-  if (startCol > 8 || startCol + numCols - 1 < 8) return;  // col H = Status
+  if (startCol > 9 || startCol + numCols - 1 < 9) return;  // col I = Status
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const purSheet = ss.getSheetByName(SHEETS.PURCHASES);
@@ -76,8 +76,8 @@ function handleHardwareListEdit_(e) {
  * Returns the new PUR-code, or null if skipped.
  */
 function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
-  const row = hwSheet.getRange(hwRow, 1, 1, 11).getValues()[0];
-  const [hwId, project, material, spec, qty, inStock, unit, status, /*remarks*/, pushed, rsv] = row;
+  const row = hwSheet.getRange(hwRow, 1, 1, 12).getValues()[0];
+  const [hwId, project, material, spec, qty, inStock, unit, /*itemStatus*/, status, /*remarks*/, pushed, rsv] = row;
   if (status !== 'Out of Stock') return null;
   if (pushed) return null;
   if (!hwId || !material) return null;
@@ -119,6 +119,6 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   purSheet.getRange(newRow, 14).setValue('Not Ordered');
   purSheet.getRange(newRow, 15).setValue('From ' + hwId + (need !== qty ? ' (short ' + need + ' of ' + qty + ')' : ''));
 
-  hwSheet.getRange(hwRow, 10).setValue(purCode);
+  hwSheet.getRange(hwRow, 11).setValue(purCode);
   return purCode;
 }

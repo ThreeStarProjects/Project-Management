@@ -2,10 +2,10 @@
  * _Interlink_Reserve.gs  (v0.4 Phase 4, PM side)
  * -----------------------------------------------------------------------------
  * PM → IMS reservations via a request queue. IMS processes 'PM Reservation
- * Requests' (its own trigger + addReservation()). Hardware List col K shows the
+ * Requests' (its own trigger + addReservation()). Hardware List col L shows the
  * outcome:
  *
- *   K  IMS Reservation:  "PMR-xxxx | pending | 5"  →  "RSV-0012 | reserved 5"
+ *   L  IMS Reservation:  "PMR-xxxx | pending | 5"  →  "RSV-0012 | reserved 5"
  *                        (then follows IMS: "released 5" / "consumed 5")
  *                        or "⚠ <reason>" (a ⚠ row is re-evaluated on its next edit)
  *
@@ -13,7 +13,7 @@
  * which runs automatically on edit and from the 🔗 Interlink menu. This file holds the
  * queue plumbing and the status refresh.
  *
- * No duplicates: (1) PM never queues a row whose K is already filled (unless ⚠),
+ * No duplicates: (1) PM never queues a row whose L is already filled (unless ⚠),
  * (2) IM_queueReservations_ skips a request still Pending for the same row + item,
  * (3) IMS skips any request that already has an Active reservation for the same
  * item + reference (see IMS _Interlink_Reservations.gs).
@@ -21,10 +21,10 @@
  * Needs EDIT access to the IMS sheet for whoever triggers it (it appends to the IMS
  * queue sheet). Qty is passed as-is: PM Unit and IMS UOM are assumed to match.
  *
- * One-time: run IM_installReserve() from the editor (adds the K header).
+ * One-time: run IM_installReserve() from the editor (adds the L header).
  */
 
-var IM_HW_RSV_COL = 11;  // K
+var IM_HW_RSV_COL = 12;  // L
 var IM_RSV_QUEUE  = 'PM Reservation Requests';  // same name as IMS side
 
 function IM_installReserve() {
@@ -35,7 +35,7 @@ function IM_installReserve() {
     .setFontWeight('bold').setFontSize(11)
     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
   hw.setColumnWidth(IM_HW_RSV_COL, 200);
-  IM_sayR_('Hardware List col K ready.');
+  IM_sayR_('Hardware List col L ready.');
 }
 
 function IM_sayR_(msg) {
@@ -88,7 +88,7 @@ function IM_reserveSelected() {
 }
 
 /**
- * Bring Hardware List col K up to date from IMS (read-only):
+ * Bring Hardware List col L up to date from IMS (read-only):
  *   "PMR-x | pending | n"  →  "RSV-0012 | reserved n"   (queue request processed), or "⚠ reason"
  *   "RSV-0012 | reserved n" follows the Reservation Register: reserved / released / consumed.
  * Runs on sheet open and from the 🔗 Interlink menu.

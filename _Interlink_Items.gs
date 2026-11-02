@@ -8,21 +8,36 @@
  *   F In Stock (IMS)     Available − Reserved, one plain formula per row
  *
  * Both sheets get the same new column F (right after Required Qty); everything
- * from the old F onward moves one column right:
+ * from the old F onward moves one column right. Hardware List also gets
+ * H "Item Status" (right after Unit), a per-row formula over L (IMS Reservation)
+ * and K (Pushed to Purchases):
  *   Hardware List: A ID | B Project | C Material | D Spec | E Req Qty | F In Stock |
- *                  G Unit | H Status | I Remarks | J Pushed to Purchases
+ *                  G Unit | H Item Status | I Status | J Remarks | K Pushed to Purchases |
+ *                  L IMS Reservation
  *   Purchases:     A ID | B Project | C Material | D Spec | E Req Qty | F In Stock |
  *                  G Ordered | H Unit | I Vendor | J PO Issued | K Expected | L Actual |
  *                  M Variance | N Status | O Remarks
  * Picking an item in C fills Unit (G on Hardware, H on Purchases) if blank.
  *
+ * Hardware List col I is "Stock Status" (In Stock / Out of Stock dropdown); col H is "Item Status".
+ *
+ * Item Status (H) is a live per-row formula; no script has to run for it to change:
+ *   Reservation: Not Reserved (IMS item, nothing reserved) / Reserving… / Reserved / Released /
+ *     Consumed / ⚠ Reservation error. It follows IMS directly: _IMS_Items imports IMS's
+ *     'PM Reservation Requests' (K:M) and 'Reservation Register' (O:P), so a release or consume
+ *     in IMS shows up here by itself. Col L's text is only the fallback.
+ *   Order (from the linked Purchases row's Status): To order / Ordered / Delivered.
+ *   Joined as e.g. "Reserved + Ordered". Free-text (non-IMS) materials never show "Not Reserved".
+ *
  * Rollout (push the code, then straight away, from the editor):
- *   1. IM_installItems()   idempotent; inserts col F in the live sheets (native
- *                          insert shifts existing formulas / validations / colours),
- *                          then re-seeds ARRAYFORMULAs from the updated code.
- *   2. Open _IMS_Items (View → Hidden sheets), click A2, press "Allow access".
- *   3. IM_verifyWiring()   PASS/FAIL list for every rewired reference.
- * Re-run IM_installItems() after "Create/Rebuild Hardware List Sheet".
+ *   1. IM_installItems()      idempotent; inserts col F in the live sheets (native
+ *                             insert shifts existing formulas / validations / colours),
+ *                             then re-seeds ARRAYFORMULAs from the updated code.
+ *   2. IM_installItemStatus() inserts Hardware List col H, renames I to Stock Status,
+ *                             and (re)writes the IMS imports (idempotent).
+ *   3. Open _IMS_Items (View → Hidden sheets), click A2, press "Allow access".
+ *   4. IM_verifyWiring() + IM_verifyItemStatus()   PASS/FAIL lists.
+ * Re-run IM_installItems() and IM_installItemStatus() after "Create/Rebuild Hardware List Sheet".
  */
 
 var IM_IMS_SHEET_ID = '1CglvPxUWZnIHNeToGEDz8-Xj3eNfvaF351j_ogpRTgk';
@@ -30,6 +45,9 @@ var IM_ITEMS_SHEET  = '_IMS_Items';
 var IM_MAT_COL      = 3;   // C
 var IM_STOCK_COL    = 6;   // F
 var IM_STOCK_HDR    = 'In Stock (IMS)';
+var IM_HW_ITEMSTATUS_COL = 8;   // H
+var IM_ITEMSTATUS_HDR    = 'Item Status';
+var IM_STOCKSTATUS_HDR   = 'Stock Status';   // Hardware List col I (was "Status")
 
 /** Sheets that carry the Material dropdown + In Stock column, and where their Unit lives. */
 function IM_itemSheets_() {
@@ -60,6 +78,7 @@ function IM_installItems() {
     '={QUERY(IMPORTRANGE("' + id + '","Stock Snapshot!A2:J"),"select Col1,Col9-Col10 where Col1 is not null",0);' +
     'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:M"),"select Col1,Col13 where Col1 is not null",0)}');
   it.getRange('E2').setFormula('=ARRAYFORMULA(IF(A2:A="","",IFERROR(VLOOKUP(A2:A,H:I,2,FALSE),0)))');
+  IM_writeStatusImports_(it);
   it.hideSheet();
 
   // --- per-sheet column migration -----------------------------------------
@@ -107,6 +126,80 @@ function IM_stockFormula_(r) {
   return '=IF($C' + r + '="","",IFERROR(VLOOKUP($C' + r + ',' + IM_ITEMS_SHEET + '!$B:$E,4,FALSE),"n/a"))';
 }
 
+/**
+ * IMS reservation data for Item Status, imported into the hidden helper sheet (live, no script):
+ *   K:M  PM Reservation Requests → Request ID, Reservation No, Queue Status
+ *   O:P  Reservation Register    → Reservation No, Status (Active / Released / Consumed)
+ */
+function IM_writeStatusImports_(it) {
+  var id = IM_IMS_SHEET_ID;
+  it.getRange('K1:M1').setValues([['Request ID', 'Res No', 'Queue Status']]);
+  it.getRange('K2').setFormula(
+    '=IFERROR(QUERY(IMPORTRANGE("' + id + '","PM Reservation Requests!A2:I"),"select Col1,Col9,Col8 where Col1 is not null",0),"")');
+  it.getRange('O1:P1').setValues([['Res No', 'Register Status']]);
+  it.getRange('O2').setFormula(
+    '=IFERROR(QUERY(IMPORTRANGE("' + id + '","Reservation Register!A2:I"),"select Col2,Col9 where Col2 is not null",0),"")');
+}
+
+/**
+ * Hardware List "Item Status" (col H) for one row, from L (IMS Reservation text), K (PUR code) and F (stock).
+ * Reservation part, live from IMS via the helper sheet (falls back to L's text if IMS has no row for it):
+ *   Consumed / Released / Reserved (Register status) · ⚠ Reservation error · Reserving… (request still pending)
+ *   · Not Reserved (IMS item with no reservation yet) · blank for free-text materials.
+ * Order part (linked Purchases Status): To order (Not Ordered) / Ordered (PO Issued, In Transit) /
+ *   Delivered / otherwise that status text.  Both present → "Reserved + Ordered".
+ */
+function IM_itemStatusFormula_(r) {
+  var I = IM_ITEMS_SHEET, P = SHEETS.PURCHASES;
+  return '=LET(resvRaw,$L' + r + ',purch,$K' + r + ',isIms,ISNUMBER($F' + r + '),' +
+    'reqId,IFERROR(REGEXEXTRACT(resvRaw,"^PMR-\\w+"),""),' +
+    'rsvNo,IFERROR(REGEXEXTRACT(resvRaw,"^RSV-\\d+"),IF(reqId="","",IFERROR(VLOOKUP(reqId,' + I + '!$K:$M,2,FALSE),""))),' +
+    'qStat,IF(reqId="","",IFERROR(VLOOKUP(reqId,' + I + '!$K:$M,3,FALSE),"")),' +
+    'regStat,IF(rsvNo="","",IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$P,2,FALSE),"")),' +
+    'liveState,IF(regStat="Active","Reserved",IF(OR(regStat="Released",regStat="Consumed"),regStat,"")),' +
+    'textState,IF(REGEXMATCH(resvRaw,"consumed"),"Consumed",IF(REGEXMATCH(resvRaw,"released"),"Released",' +
+      'IF(REGEXMATCH(resvRaw,"reserved"),"Reserved",""))),' +
+    'state,IF(liveState<>"",liveState,textState),' +
+    'resvText,IF(state<>"",state,IF(OR(qStat="Error",LEFT(resvRaw,1)="⚠"),"⚠ Reservation error",' +
+      'IF(reqId<>"","Reserving…",IF(isIms,"Not Reserved","")))),' +
+    'pstat,IF(purch="","",IFERROR(VLOOKUP(purch,' + P + '!$A:$N,14,FALSE),"")),' +
+    'ordText,IF(purch="","",IF(OR(pstat="PO Issued",pstat="In Transit"),"Ordered",IF(pstat="Delivered","Delivered",' +
+      'IF(OR(pstat="Not Ordered",pstat=""),"To order",pstat)))),' +
+    'IF(AND(resvText<>"",ordText<>""),resvText&" + "&ordText,resvText&ordText))';
+}
+
+/**
+ * Hardware List: insert col H "Item Status" (right after Unit), rename col I to "Stock Status",
+ * (re)write the IMS imports it reads, and fill its per-row formulas. Idempotent.
+ */
+function IM_installItemStatus() {
+  var ss = SpreadsheetApp.getActive();
+  var hw = ss.getSheetByName(SHEETS.HARDWARE), it = ss.getSheetByName(IM_ITEMS_SHEET);
+  if (!hw) { IM_say_('Hardware List sheet not found.'); return; }
+  if (!it) { IM_say_('Run IM_installItems() first (the hidden ' + IM_ITEMS_SHEET + ' sheet is missing).'); return; }
+  if (hw.getRange(1, IM_HW_ITEMSTATUS_COL).getValue() !== IM_ITEMSTATUS_HDR) {
+    if (hw.getRange(1, IM_HW_ITEMSTATUS_COL - 1).getValue() !== 'Unit') {
+      IM_say_('Expected "Unit" in column G of Hardware List; nothing changed.');
+      return;
+    }
+    hw.insertColumnAfter(IM_HW_ITEMSTATUS_COL - 1);  // new H; Status / Remarks / Pushed / IMS Reservation shift right
+  }
+  hw.getRange(1, IM_HW_ITEMSTATUS_COL + 1).setValue(IM_STOCKSTATUS_HDR);  // old "Status" → "Stock Status"
+  IM_writeStatusImports_(it);
+  hw.getRange(2, IM_HW_ITEMSTATUS_COL, MAX_ROWS - 1, 1).clearDataValidations();  // a new column can inherit Unit's dropdown
+  hw.getRange(1, IM_HW_ITEMSTATUS_COL).setValue(IM_ITEMSTATUS_HDR)
+    .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG)
+    .setFontWeight('bold').setFontSize(11)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+  hw.setColumnWidth(IM_HW_ITEMSTATUS_COL, 150);
+
+  var f = [];
+  for (var r = 2; r <= MAX_ROWS; r++) f.push([IM_itemStatusFormula_(r)]);
+  hw.getRange(2, IM_HW_ITEMSTATUS_COL, MAX_ROWS - 1, 1).setFormulas(f).setHorizontalAlignment('center');
+  IM_say_('Hardware List: H "Item Status" ready, I renamed "Stock Status". Open the hidden ' + IM_ITEMS_SHEET +
+          ' sheet and click K2 and O2 to press "Allow access" if they show an error. Then run IM_verifyWiring() and IM_verifyItemStatus().');
+}
+
 function IM_say_(msg) {
   try { SpreadsheetApp.getUi().alert('Items', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
   catch (e) { Logger.log(msg); }  // run from editor: no UI context
@@ -146,11 +239,13 @@ function IM_fillUnit_(e, sh, t, r) {
     if (!m) return;  // free-text material
 
     // IMS UOM → PM Unit dropdown value; unmapped UOMs (e.g. Liters) are left for the user.
+    // IMS also lists PM's own names exactly (see IMS _Interlink_Units.gs), so those map to themselves.
     var uomMap = { 'no.s': 'Pcs', 'nos': 'Pcs', 'pcs': 'Pcs', 'units': 'Pcs', 'unit': 'Pcs',
                    'pieces': 'Pcs', 'piece': 'Pcs', 'kilograms': 'Kg', 'kg': 'Kg',
                    'meters': 'Meter', 'meter': 'Meter', 'sets': 'Set', 'set': 'Set',
                    'boxes': 'Box', 'box': 'Box', 'rolls': 'Roll', 'roll': 'Roll',
-                   'sq.ft': 'Sq.ft', 'sq.m': 'Sq.m' };
+                   'square feet': 'Sq.ft', 'sq.ft': 'Sq.ft', 'square meters': 'Sq.m', 'sq.m': 'Sq.m',
+                   'other': 'Other' };
     var u = uomMap[String(m[2]).toLowerCase()];
     var cell = sh.getRange(r.getRow(), t.unitCol);
     if (u && !cell.getValue()) cell.setValue(u);
@@ -178,7 +273,8 @@ function IM_verifyWiring() {
   };
 
   var H = SHEETS.HARDWARE, P = SHEETS.PURCHASES;
-  [[H, 5, 'Required Qty'], [H, 6, IM_STOCK_HDR], [H, 7, 'Unit'], [H, 8, 'Status'], [H, 10, 'Pushed to Purchases'],
+  [[H, 5, 'Required Qty'], [H, 6, IM_STOCK_HDR], [H, 7, 'Unit'], [H, 8, IM_ITEMSTATUS_HDR], [H, 9, IM_STOCKSTATUS_HDR],
+   [H, 11, 'Pushed to Purchases'], [H, 12, 'IMS Reservation'],
    [P, 5, 'Required Qty'], [P, 6, IM_STOCK_HDR], [P, 7, 'Ordered Qty'], [P, 8, 'Unit'], [P, 9, 'Vendor'],
    [P, 10, 'PO Issued'], [P, 11, 'Expected Delivery'], [P, 12, 'Actual Delivery'], [P, 13, 'Variance (Days)'],
    [P, 14, 'Status'], [P, 15, 'Remarks']
@@ -188,8 +284,11 @@ function IM_verifyWiring() {
   var mf = pur ? pur.getRange('M2').getFormula() : '';
   check('Purchases M2 variance = L − K', mf.indexOf('L2:L-K2:K') >= 0 && mf.indexOf('K2:K=""') >= 0);
 
-  check('Hardware H (Status) dropdown', dvHas(H, 'H2', 'Out of Stock'));
+  var hwSheet = ss.getSheetByName(H);
+  check('Hardware H2 Item Status formula reads K and L', !!hwSheet && /\$L2/.test(hwSheet.getRange('H2').getFormula()) && /\$K2/.test(hwSheet.getRange('H2').getFormula()));
+  check('Hardware I (Stock Status) dropdown', dvHas(H, 'I2', 'Out of Stock'));
   check('Hardware G (Unit) dropdown',   dvHas(H, 'G2', 'Pcs'));
+  check('Hardware H (Item Status) has no dropdown', !!hwSheet && !hwSheet.getRange('H2').getDataValidation());
   check('Purchases N (Status) dropdown', dvHas(P, 'N2', 'Delivered'));
   check('Purchases J (PO Issued) dropdown', dvHas(P, 'J2', 'Yes'));
   check('Purchases H (Unit) dropdown',   dvHas(P, 'H2', 'Pcs'));
@@ -211,6 +310,63 @@ function IM_verifyWiring() {
   check('trigger onEditHandler installed',          handlers.indexOf('onEditHandler') >= 0);
   check('trigger IM_onHardwareItemEdit_ installed', handlers.indexOf('IM_onHardwareItemEdit_') >= 0);
 
+  Logger.log(out.join('\n'));
+  IM_say_(out.join('\n'));
+  return out;
+}
+
+// -----------------------------------------------------------------------------
+// Live check of the Item Status formula (Hardware List col H). Uses the first empty
+// Hardware row and first empty Purchases row as scratch, then clears what it wrote.
+// -----------------------------------------------------------------------------
+function IM_verifyItemStatus() {
+  var ss = SpreadsheetApp.getActive();
+  var hw = ss.getSheetByName(SHEETS.HARDWARE), pur = ss.getSheetByName(SHEETS.PURCHASES);
+  if (!hw || !pur) { IM_say_('Hardware List / Purchases sheet missing.'); return; }
+
+  // [F stock (number = IMS item, "n/a" = free text), L IMS Reservation, K PUR code, linked Purchases status, expected]
+  // These use made-up RSV/PMR numbers, so they exercise the text fallback. The live IMS lookup
+  // (Register / queue imports) is checked by the first real reservation: reserve, then release in IMS.
+  var cases = [
+    [30,    '',                     '',         '',            'Not Reserved'],
+    [30,    'PMR-t | pending | 5',  '',         '',            'Reserving…'],
+    [30,    'RSV-1 | reserved 5',   '',         '',            'Reserved'],
+    [30,    'RSV-1 | released 5',   '',         '',            'Released'],
+    [30,    'RSV-1 | consumed 5',   '',         '',            'Consumed'],
+    [30,    '⚠ IMS error',          '',         '',            '⚠ Reservation error'],
+    ['n/a', '',                     '',         '',            ''],
+    ['n/a', '',                     'PUR-TEST', 'Not Ordered', 'To order'],
+    ['n/a', '',                     'PUR-TEST', 'In Transit',  'Ordered'],
+    ['n/a', '',                     'PUR-TEST', 'Delivered',   'Delivered'],
+    [30,    '',                     'PUR-TEST', 'Not Ordered', 'Not Reserved + To order'],
+    [0,     '',                     'PUR-TEST', 'PO Issued',   'Not Reserved + Ordered'],
+    [30,    'RSV-1 | reserved 5',   'PUR-TEST', 'PO Issued',   'Reserved + Ordered'],
+    [30,    'RSV-1 | consumed 5',   'PUR-TEST', 'Delivered',   'Consumed + Delivered']
+  ];
+  var out = [];
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(15000);
+  var hr = firstEmptyRow_(hw, 1), pr = firstEmptyRow_(pur, 1);
+  var reset = function () {
+    hw.getRange(hr, 11, 1, 2).clearContent();                 // K, L
+    hw.getRange(hr, IM_STOCK_COL).setFormula(IM_stockFormula_(hr));
+    pur.getRange(pr, 1).clearContent(); pur.getRange(pr, 14).clearContent();  // A ID, N Status
+  };
+  try {
+    cases.forEach(function (c) {
+      hw.getRange(hr, IM_STOCK_COL).setValue(c[0]);           // simulate an IMS item / a free-text one
+      hw.getRange(hr, 11, 1, 2).setValues([[c[2], c[1]]]);
+      pur.getRange(pr, 1).setValue(c[2] ? 'PUR-TEST' : '');
+      pur.getRange(pr, 14).setValue(c[3]);
+      SpreadsheetApp.flush();
+      var got = String(hw.getRange(hr, IM_HW_ITEMSTATUS_COL).getValue());
+      out.push((got === c[4] ? 'PASS  ' : 'FAIL  ') + 'F=' + c[0] + ' L="' + c[1] + '" K="' + c[2] + '" purchase="' + c[3] + '" → "' + got + '"' +
+               (got === c[4] ? '' : ' (expected "' + c[4] + '")'));
+    });
+  } finally {
+    reset();
+    lock.releaseLock();
+  }
   Logger.log(out.join('\n'));
   IM_say_(out.join('\n'));
   return out;

@@ -192,7 +192,7 @@ function rebuildOneSheet_(name, createFn, formatFn) {
 
 /**
  * One-shot backfill: create a Hardware List row for every existing Purchases row.
- * Each backfilled row is marked Out of Stock and col I (Pushed) is stamped with the
+ * Each backfilled row is marked Out of Stock and col K (Pushed) is stamped with the
  * PUR-code so the onEdit trigger will NOT create a duplicate Purchase later.
  */
 function importPurchasesIntoHardwareList() {
@@ -210,7 +210,7 @@ function importPurchasesIntoHardwareList() {
   const alreadyPushed = new Set();
   const hwLast = hwSheet.getLastRow();
   if (hwLast >= 2) {
-    hwSheet.getRange(2, 10, hwLast - 1, 1).getValues().forEach(r => {
+    hwSheet.getRange(2, 11, hwLast - 1, 1).getValues().forEach(r => {
       if (r[0]) alreadyPushed.add(String(r[0]));
     });
   }
@@ -224,7 +224,7 @@ function importPurchasesIntoHardwareList() {
     if (alreadyPushed.has(String(purCode))) { skipped++; continue; }
     const hwCode = 'HW-' + String(nextHwNum++).padStart(3, '0');
     const qty = (reqQty !== '' && reqQty !== null) ? reqQty : ordQty;
-    toInsert.push([hwCode, project, material, spec, qty, unit, 'Out of Stock', 'Imported from ' + purCode, purCode]);  // A-E, G-J (F = formula)
+    toInsert.push([hwCode, project, material, spec, qty, unit, 'Out of Stock', 'Imported from ' + purCode, purCode]);  // A-E, G, I-K (F, H = formulas)
   }
 
   if (toInsert.length === 0) {
@@ -241,9 +241,10 @@ function importPurchasesIntoHardwareList() {
   if (confirm !== ui.Button.YES) return;
 
   const startRow = firstEmptyRow_(hwSheet, 1);
-  // F (In Stock) is a formula column — write A:E and G:J around it.
+  // F (In Stock) and H (Item Status) are formula columns — write A:E, G and I:K around them.
   hwSheet.getRange(startRow, 1, toInsert.length, 5).setValues(toInsert.map(r => r.slice(0, 5)));
-  hwSheet.getRange(startRow, 7, toInsert.length, 4).setValues(toInsert.map(r => r.slice(5)));
+  hwSheet.getRange(startRow, 7, toInsert.length, 1).setValues(toInsert.map(r => r.slice(5, 6)));
+  hwSheet.getRange(startRow, 9, toInsert.length, 3).setValues(toInsert.map(r => r.slice(6)));
   ui.alert('✅ Imported ' + toInsert.length + ' row(s). Skipped: ' + skipped + '.');
 }
 
