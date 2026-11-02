@@ -86,9 +86,13 @@ function IM_onHardwareItemEdit_(e) {
 
     var row = r.getRow();
     if (!sh.getRange(row, 3).getValue()) sh.getRange(row, 3).setValue(m[3]);   // Material ← Item Name
-    var units = ['Sq.ft', 'Sq.m', 'Pcs', 'Box', 'Roll', 'Kg', 'Meter', 'Set', 'Other'];
-    var u = units.filter(function (x) { return x.toLowerCase() === String(m[2]).toLowerCase(); })[0];
-    if (u && !sh.getRange(row, 6).getValue()) sh.getRange(row, 6).setValue(u); // Unit ← UOM if in PM's list
+    // IMS UOM → PM Unit dropdown value; unmapped UOMs (e.g. Liters) are left for the user.
+    var uomMap = { 'no.s': 'Pcs', 'nos': 'Pcs', 'pcs': 'Pcs', 'kilograms': 'Kg', 'kg': 'Kg',
+                   'meters': 'Meter', 'meter': 'Meter', 'sets': 'Set', 'set': 'Set',
+                   'boxes': 'Box', 'box': 'Box', 'rolls': 'Roll', 'roll': 'Roll',
+                   'sq.ft': 'Sq.ft', 'sq.m': 'Sq.m' };
+    var u = uomMap[String(m[2]).toLowerCase()];
+    if (u && !sh.getRange(row, 6).getValue()) sh.getRange(row, 6).setValue(u);
   } catch (err) {
     Logger.log('IM_onHardwareItemEdit_ error: ' + err.message);
   }
