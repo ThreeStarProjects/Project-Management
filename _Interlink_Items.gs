@@ -82,9 +82,7 @@ function IM_installItems() {
 
     // F: one plain formula per row (survives row deletes and the Purchases import)
     var f = [];
-    for (var r = 2; r <= MAX_ROWS; r++) {
-      f.push(['=IF($C' + r + '="","",IFERROR(VLOOKUP($C' + r + ',' + IM_ITEMS_SHEET + '!$B:$E,4,FALSE),"n/a"))']);
-    }
+    for (var r = 2; r <= MAX_ROWS; r++) f.push([IM_stockFormula_(r)]);
     sh.getRange(2, IM_STOCK_COL, MAX_ROWS - 1, 1).setFormulas(f).setHorizontalAlignment('center');
     sh.getRange(2, IM_MAT_COL, MAX_ROWS - 1, 1).setDataValidation(rule);
   });
@@ -104,19 +102,42 @@ function IM_installItems() {
           'click A2 and press "Allow access". Then run IM_verifyWiring().');
 }
 
+/** In Stock (IMS) formula for one row: item stock for IMS items, "n/a" for free text, blank if no material. */
+function IM_stockFormula_(r) {
+  return '=IF($C' + r + '="","",IFERROR(VLOOKUP($C' + r + ',' + IM_ITEMS_SHEET + '!$B:$E,4,FALSE),"n/a"))';
+}
+
 function IM_say_(msg) {
   try { SpreadsheetApp.getUi().alert('Items', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
   catch (e) { Logger.log(msg); }  // run from editor: no UI context
 }
 
-/** Item picked in Material (C) → fill Unit if blank (Hardware List G, Purchases H). */
+/**
+ * Edit trigger for Hardware List / Purchases.
+ *  - Material (C) picked  → fill Unit if blank (Hardware G, Purchases H).
+ *  - Hardware List Project (B), Material (C) or Required Qty (E) edited → IM_autoEvaluateHardwareRow_
+ *    (Status auto-set, reservation queued, shortfall pushed to Purchases).
+ */
 function IM_onHardwareItemEdit_(e) {
   try {
     if (!e || !e.range) return;
     var r = e.range, sh = r.getSheet();
     var t = IM_itemSheets_().filter(function (x) { return x.name === sh.getName(); })[0];
-    if (!t || r.getRow() < 2) return;
-    if (r.getColumn() !== IM_MAT_COL || r.getNumRows() !== 1) return;
+    if (!t || r.getRow() < 2 || r.getNumRows() !== 1 || r.getNumColumns() !== 1) return;
+    var col = r.getColumn();
+    if (col === IM_MAT_COL) IM_fillUnit_(e, sh, t, r);
+    if (t.name === SHEETS.HARDWARE && (col === 2 || col === IM_MAT_COL || col === 5)) {
+      var res = IM_autoEvaluateHardwareRow_(sh, r.getRow());
+      if (res.indexOf('skipped') !== 0) e.source.toast(res, 'Hardware List', 8);  // stay quiet while the row is still incomplete
+    }
+  } catch (err) {
+    Logger.log('IM_onHardwareItemEdit_ error: ' + err.message);
+  }
+}
+
+/** Fill Unit from the picked IMS item's UOM, if the Unit cell is blank. */
+function IM_fillUnit_(e, sh, t, r) {
+  try {
     var label = String(r.getValue());
     if (!label) return;
 
@@ -134,7 +155,7 @@ function IM_onHardwareItemEdit_(e) {
     var cell = sh.getRange(r.getRow(), t.unitCol);
     if (u && !cell.getValue()) cell.setValue(u);
   } catch (err) {
-    Logger.log('IM_onHardwareItemEdit_ error: ' + err.message);
+    Logger.log('IM_fillUnit_ error: ' + err.message);
   }
 }
 
