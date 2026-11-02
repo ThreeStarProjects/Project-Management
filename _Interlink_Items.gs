@@ -31,10 +31,10 @@ function IM_installItems() {
   var id = IM_IMS_SHEET_ID;
   it.getRange('A1:E1').setValues([['Code', 'Label', 'UOM', 'Item Name', 'Net Stock']]);
   it.getRange('H1:I1').setValues([['Stock Code', 'Stock Net']]);
-  // Items + SFGs (inactive rows dropped). Search Label = Item Master T / SFG Master N.
+  // Items + SFGs (Active? filter removed: errored on IMS data; ponytail: add back once column type known). Search Label = Item Master T / SFG Master N.
   it.getRange('A2').setFormula(
-    '={QUERY(IMPORTRANGE("' + id + '","Item Master!A2:T"),"select Col1,Col20,Col7,Col4 where Col1 is not null and Col19 <> \'No\'",0);' +
-    'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:N"),"select Col1,Col14,Col7,Col4 where Col1 is not null and Col11 <> \'No\'",0)}');
+    '={QUERY(IMPORTRANGE("' + id + '","Item Master!A2:T"),"select Col1,Col20,Col7,Col4 where Col1 is not null",0);' +
+    'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:N"),"select Col1,Col14,Col7,Col4 where Col1 is not null",0)}');
   // Stock: RM = Snapshot Available − Reserved; SFG = SFG Master Available (already net).
   it.getRange('H2').setFormula(
     '={QUERY(IMPORTRANGE("' + id + '","Stock Snapshot!A2:J"),"select Col1,Col9-Col10 where Col1 is not null",0);' +
