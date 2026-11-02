@@ -65,10 +65,9 @@ function IM_installItems() {
   });
   ScriptApp.newTrigger('IM_onHardwareItemEdit_').forSpreadsheet(ss).onEdit().create();
 
-  SpreadsheetApp.getUi().alert(
-    'Items wired',
-    'Now open the hidden "' + IM_ITEMS_SHEET + '" sheet (View → Hidden sheets), click A2 and press "Allow access".',
-    SpreadsheetApp.getUi().ButtonSet.OK);
+  var msg = 'Now open the hidden "' + IM_ITEMS_SHEET + '" sheet (View → Hidden sheets), click A2 and press "Allow access".';
+  try { SpreadsheetApp.getUi().alert('Items wired', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
+  catch (e) { Logger.log('Items wired. ' + msg); }  // run from editor: no UI context
 }
 
 /** Item Code picked in J → fill Material (C) and Unit (F) if blank. */
