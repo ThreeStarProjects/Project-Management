@@ -151,13 +151,13 @@ function previewDeleteProject(id) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const pv = Masters.previewProjectDelete(match.id, ss.getId(), match.label);
   if (pv.problems.length) return { problems: pv.problems.join('\n\n') + '\n\nNothing was deleted.' };
-  const part = (title, list) => title + ': ' + (list.filter(x => x.n).map(x => x.sheet + ' ' + x.n).join(', ') || 'nothing found');
+  const part = (title, list) => title + ': ' + (list.filter(x => x.n).map(x => x.sheet + ' ' + x.n + (x.names && x.names.length ? ' [' + x.names.join(' | ') + ']' : '')).join(', ') || 'nothing found');
   const notes = [].concat(pv.systems.fin, pv.systems.ims, pv.systems.pm).filter(x => x.note).map(x => x.sheet + ' (' + x.note + ')');
   return { text:
     'Delete ' + match.id + ' — ' + match.name + ' and these rows:\n\n' +
     part('Finance', pv.systems.fin) + '\n' + part('IMS', pv.systems.ims) + '\n' + part('PM', pv.systems.pm) +
     '\nMasters: the project record and its project-map pairings' +
-    (pv.aliases.length ? '\n\nAlso matches IMS/Finance project texts: ' + pv.aliases.join(', ') : '') +
+    (pv.paired && pv.paired.length ? '\n\nPaired with Finance project "' + pv.paired.join('", "') + '" in the project map: that Finance project is NOT deleted.' : '') +
     (notes.length ? '\n\nSkipped: ' + notes.join(', ') : '') };
 }
 
