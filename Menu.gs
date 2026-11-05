@@ -81,32 +81,46 @@ function menuOpenProjectView() {
   view.setActiveRange(view.getRange('B3'));
 }
 
+/**
+ * Delete a project from EVERY system (PM, IMS, Finance) and Masters. The work is done by
+ * Masters.executeProjectDelete (Masters ProjectDelete.gs): it shows what will go (preview),
+ * asks you to type the project ID, copies each removed row to a hidden "_Deleted_Project_Rows"
+ * sheet in its own system, then deletes. PM is deleted last so a failure can be re-run.
+ */
 function menuDeleteProject() {
   const match = findProjectByQuery_();
   if (!match) return;
   const ui = SpreadsheetApp.getUi();
-  const confirm = ui.alert(
-    'Delete project?',
-    'Permanently delete ' + match.id + ' — ' + match.name + ' from Projects and every related row in Milestones, Hardware List, Purchases, Production, Snags, and Tickets. Continue?',
-    ui.ButtonSet.YES_NO
-  );
-  if (confirm !== ui.Button.YES) return;
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  let total = 0;
-  // (sheet name, project-label column 1-based, match value)
-  const targets = [
-    [SHEETS.PROJECTS,   1,  match.id],
-    [SHEETS.MILESTONES, 1,  match.label],
-    [SHEETS.HARDWARE,   2,  match.label],
-    [SHEETS.PURCHASES,  2,  match.label],
-    [SHEETS.PRODUCTION, 2,  match.label],
-    [SHEETS.SNAGS,      2,  match.label],
-    [SHEETS.TICKETS,    11, match.label]
-  ];
-  targets.forEach(([n, c, v]) => { total += deleteAllRowsByValue_(ss.getSheetByName(n), c, v); });
-  // deleteRow on row 2 can wipe ARRAYFORMULA seeds. Re-install unconditionally.
-  reseedArrayFormulas_(ss);
-  ui.alert('✅ Deleted ' + match.id + '. ' + total + ' row(s) removed.');
+
+  let pv;
+  try { pv = Masters.previewProjectDelete(match.id, ss.getId(), match.label); }
+  catch (e) { ui.alert('Cannot prepare the delete', e.message, ui.ButtonSet.OK); return; }
+  if (pv.problems.length) { ui.alert('Nothing was deleted', pv.problems.join('\n\n'), ui.ButtonSet.OK); return; }
+
+  const part = (title, list) => title + ': ' + (list.filter(x => x.n).map(x => x.sheet + ' ' + x.n).join(', ') || 'nothing found');
+  const notes = [].concat(pv.systems.fin, pv.systems.ims, pv.systems.pm).filter(x => x.note).map(x => x.sheet + ' (' + x.note + ')');
+  const ask = ui.prompt(
+    'Delete ' + match.id + ' everywhere?',
+    'This PERMANENTLY removes ' + match.id + ' — ' + match.name + ' rows from all systems:\n\n' +
+    part('Finance', pv.systems.fin) + '\n' + part('IMS', pv.systems.ims) + '\n' + part('PM', pv.systems.pm) +
+    (pv.aliases.length ? '\n\nAlso matches IMS/Finance project texts: ' + pv.aliases.join(', ') : '') +
+    (notes.length ? '\n\nSkipped: ' + notes.join(', ') : '') +
+    '\n\nEvery removed row is first copied to a hidden "_Deleted_Project_Rows" sheet in its own system.' +
+    '\nType the project ID (' + match.id + ') to confirm:',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (ask.getSelectedButton() !== ui.Button.OK) return;
+
+  let res;
+  try { res = Masters.executeProjectDelete(match.id, ss.getId(), match.label, ask.getResponseText()); }
+  catch (e) { ui.alert('Nothing was deleted', e.message, ui.ButtonSet.OK); return; }
+  reseedArrayFormulas_(ss);  // deleteRow on row 2 can wipe ARRAYFORMULA seeds. Re-install unconditionally.
+  const sum = ['fin', 'ims', 'pm'].map(k => (res.deleted[k] || []).map(x => x.sheet + ' ' + x.n).join(', ')).filter(String).join('\n');
+  ui.alert(res.complete ? '✅ Deleted ' + match.id : '⚠ ' + match.id + ' only partly deleted',
+    (sum ? 'Removed:\n' + sum + '\n\n' : '') +
+    (res.problems.length ? 'Problems:\n' + res.problems.join('\n') + '\n\nRun Delete project again to finish.' : 'Request ' + res.requestId + '. IMS stock figures refresh within a minute.'),
+    ui.ButtonSet.OK);
 }
 
 function findProjectByQuery_() {
