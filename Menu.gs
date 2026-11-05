@@ -210,7 +210,7 @@ function importPurchasesIntoHardwareList() {
   const alreadyPushed = new Set();
   const hwLast = hwSheet.getLastRow();
   if (hwLast >= 2) {
-    hwSheet.getRange(2, 11, hwLast - 1, 1).getValues().forEach(r => {
+    hwSheet.getRange(2, IM_HW_PUSHED_COL, hwLast - 1, 1).getValues().forEach(r => {
       if (r[0]) alreadyPushed.add(String(r[0]));
     });
   }
@@ -241,10 +241,10 @@ function importPurchasesIntoHardwareList() {
   if (confirm !== ui.Button.YES) return;
 
   const startRow = firstEmptyRow_(hwSheet, 1);
-  // F (In Stock) and H (Item Status) are formula columns — write A:E, G and I:K around them.
+  // F (In Stock) and I (Item Status) are formula columns, H is the Reserve? checkbox — write A:E, G and J:L around them.
   hwSheet.getRange(startRow, 1, toInsert.length, 5).setValues(toInsert.map(r => r.slice(0, 5)));
   hwSheet.getRange(startRow, 7, toInsert.length, 1).setValues(toInsert.map(r => r.slice(5, 6)));
-  hwSheet.getRange(startRow, 9, toInsert.length, 3).setValues(toInsert.map(r => r.slice(6)));
+  hwSheet.getRange(startRow, IM_HW_STATUS_COL, toInsert.length, 3).setValues(toInsert.map(r => r.slice(6)));
   ui.alert('✅ Imported ' + toInsert.length + ' row(s). Skipped: ' + skipped + '.');
 }
 

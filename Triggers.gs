@@ -46,7 +46,7 @@ function handleAutoIdGeneration_(e) {
 
 /**
  * When a Hardware List row's Status flips to "Out of Stock", push it into Purchases.
- * One-way. No re-push if already pushed (col K holds the PUR-code).
+ * One-way. No re-push if already pushed (col L holds the PUR-code).
  * For IMS items only the shortfall (Required − reserved/in stock) is pushed.
  * No sync of subsequent edits to Purchases (avoids clobbering procurement work).
  */
@@ -58,7 +58,7 @@ function handleHardwareListEdit_(e) {
 
   const startCol = range.getColumn();
   const numCols  = range.getNumColumns();
-  if (startCol > 9 || startCol + numCols - 1 < 9) return;  // col I = Status
+  if (startCol > IM_HW_STATUS_COL || startCol + numCols - 1 < IM_HW_STATUS_COL) return;  // col J = Stock Status
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const purSheet = ss.getSheetByName(SHEETS.PURCHASES);
@@ -76,14 +76,14 @@ function handleHardwareListEdit_(e) {
  * Returns the new PUR-code, or null if skipped.
  */
 function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
-  const row = hwSheet.getRange(hwRow, 1, 1, 12).getValues()[0];
-  const [hwId, project, material, spec, qty, inStock, unit, /*itemStatus*/, status, /*remarks*/, pushed, rsv] = row;
+  const row = hwSheet.getRange(hwRow, 1, 1, IM_HW_RSV_COL).getValues()[0];
+  const [hwId, project, material, spec, qty, inStock, unit, /*reserve?*/, /*itemStatus*/, status, /*remarks*/, pushed, rsv] = row;
   if (status !== 'Out of Stock') return null;
   if (pushed) return null;
   if (!hwId || !material) return null;
 
   // IMS items (In Stock col F is a number) push only the shortfall = Required − reserved qty
-  // (col K: "RSV-.. | reserved n" or "PMR-.. | pending | n"). Only RESERVED stock counts, so two
+  // (col M: "RSV-.. | reserved n" or "PMR-.. | pending | n"). Only RESERVED stock counts, so two
   // projects can't both rely on the same unreserved stock. If IMS has stock but nothing is
   // reserved, nothing is pushed until the row is reserved. With zero stock, the full qty is pushed.
   // Free-text materials (F = "n/a"/blank) and rows without a numeric Required Qty push as before.
@@ -91,12 +91,12 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   const req = Number(qty);
   if (req > 0 && typeof inStock === 'number') {
     const toast = msg => SpreadsheetApp.getActive().toast(msg, 'Hardware List', 8);
-    const m = /(?:pending \| |reserved )([\d.]+)/.exec(String(rsv || ''));
+    const m = /(?:pending \| |reserved |partially consumed )([\d.]+)/.exec(String(rsv || ''));
     if (m) {
       need = Math.round((req - Number(m[1])) * 1000) / 1000;
       if (need <= 0) { toast(hwId + ': fully reserved from IMS stock — nothing to purchase.'); return null; }
     } else if (inStock > 0) {
-      toast(hwId + ': IMS has ' + inStock + ' in stock. Reserve this row first (🔗 Interlink → Reserve selected rows in IMS), then set Status to Out of Stock again.');
+      toast(hwId + ': IMS has ' + inStock + ' in stock. Tick Reserve? on this row first, then set Stock Status to Out of Stock again.');
       return null;
     }
   }
@@ -119,6 +119,6 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   purSheet.getRange(newRow, 14).setValue('Not Ordered');
   purSheet.getRange(newRow, 15).setValue('From ' + hwId + (need !== qty ? ' (short ' + need + ' of ' + qty + ')' : ''));
 
-  hwSheet.getRange(hwRow, 11).setValue(purCode);
+  hwSheet.getRange(hwRow, IM_HW_PUSHED_COL).setValue(purCode);
   return purCode;
 }

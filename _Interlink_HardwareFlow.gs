@@ -3,25 +3,22 @@
  * -----------------------------------------------------------------------------
  * Hardware List row → Stock Status + IMS reservation + Purchases shortfall, automatically.
  *
- * Runs when Project (B), Material (C) or Required Qty (E) is edited on an IMS item
- * (Material picked from the IMS dropdown), and from 🔗 Interlink → Reserve selected rows.
+ * Runs when the row's "Reserve?" checkbox (H) is ticked (IM_onReserveTicked_ in _Interlink_Items.gs).
  *
  *   stock ≥ required  → Status "In Stock",  reserve the full qty
  *   stock <  required → Status "Out of Stock", reserve what exists (if any) and push the
  *                       shortfall (required − reserved) to Purchases
  *   no stock at all   → Status "Out of Stock", push the full qty
  *
- * Once a row has a reservation request (col L) or a Purchases link (col K) it is left
- * alone, so edits can never reserve or order the same thing twice. To redo a row, clear
- * L (and K) on purpose. A ⚠ in L (IMS error) is retried on the next edit.
+ * Once a row has a reservation request (col M) or a Purchases link (col L) it is left
+ * alone, so ticking again can never reserve or order the same thing twice. To redo a row,
+ * clear M (and L) on purpose. A ⚠ in M (IMS error) is retried on the next tick.
  * A manual Status flip still goes through handleHardwareListEdit_ (Triggers.gs).
  *
  * Column map (Hardware List): A ID | B Project | C Material | D Spec | E Req Qty |
- *   F In Stock (IMS) | G Unit | H Item Status | I Stock Status | J Remarks |
- *   K Pushed to Purchases | L IMS Reservation
+ *   F In Stock (IMS) | G Unit | H Reserve? | I Item Status | J Stock Status | K Remarks |
+ *   L Pushed to Purchases | M IMS Reservation   (column constants: _Interlink_Items.gs)
  */
-
-var IM_HW_STATUS_COL = 9;  // I
 
 /** Pure decision: how much to reserve from stock and how much to buy. */
 function IM_decideHardwareRow_(req, stock) {
@@ -37,7 +34,8 @@ function IM_autoEvaluateHardwareRow_(sh, row) {
   try {
     SpreadsheetApp.flush();  // let the In Stock formula settle before reading it
     var v = sh.getRange(row, 1, 1, IM_HW_RSV_COL).getValues()[0];
-    var hwId = v[0], project = v[1], material = v[2], req = Number(v[4]), stock = v[5], pushed = v[10], k = String(v[11] || '');
+    var hwId = v[0], project = v[1], material = v[2], req = Number(v[4]), stock = v[5],
+        pushed = v[IM_HW_PUSHED_COL - 1], k = String(v[IM_HW_RSV_COL - 1] || '');
 
     if (!hwId || !project || !material || !(req > 0)) return 'skipped: needs Project, Material and Required Qty';
     if (typeof stock !== 'number') return 'skipped: not an IMS item';
@@ -85,7 +83,7 @@ function IM_verifyPurchasePush() {
     { name: 'IMS fully reserved (pending)', mat: 'Selftest IMS item', qty: 10, stock: 30,   rsv: 'PMR-test | pending | 10',  expect: null }
   ];
   var PUR_COLS = [1, 2, 3, 4, 5, 7, 8, 10, 14, 15];  // every Purchases cell the push writes
-  var HW_COLS  = [1, 2, 3, 4, 5, 7, 9, 11, 12];      // everything but the F and H formulas
+  var HW_COLS  = [1, 2, 3, 4, 5, 7, IM_HW_STATUS_COL, IM_HW_PUSHED_COL, IM_HW_RSV_COL];  // everything but the F and I formulas
   var lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   var r = firstEmptyRow_(hw, 1);
@@ -98,7 +96,7 @@ function IM_verifyPurchasePush() {
       hw.getRange(r, 1, 1, 5).setValues([['HW-TEST', 'PRJ-TEST', c.mat, 'selftest spec', c.qty]]);
       hw.getRange(r, 7).setValue('Pcs');
       hw.getRange(r, IM_HW_STATUS_COL).setValue('Out of Stock');
-      hw.getRange(r, 11, 1, 2).setValues([['', c.rsv]]);  // K Pushed, L IMS Reservation
+      hw.getRange(r, IM_HW_PUSHED_COL, 1, 2).setValues([['', c.rsv]]);  // L Pushed, M IMS Reservation
       if (c.stock !== null) hw.getRange(r, IM_STOCK_COL).setValue(c.stock);  // simulate an IMS item
       SpreadsheetApp.flush();
 
@@ -113,7 +111,7 @@ function IM_verifyPurchasePush() {
               p[1] === 'PRJ-TEST' && p[2] === c.mat && p[7] === 'Pcs' && p[9] === 'No' && p[13] === 'Not Ordered');
         check(c.name + ': remark names HW-TEST' + (c.expect !== c.qty ? ' and the shortfall' : ''),
               String(p[14]).indexOf('From HW-TEST') === 0 && (c.expect === c.qty || String(p[14]).indexOf('short ' + c.expect + ' of ' + c.qty) >= 0));
-        check(c.name + ': Hardware K (Pushed) = ' + code, hw.getRange(r, 11).getValue() === code);
+        check(c.name + ': Hardware L (Pushed) = ' + code, hw.getRange(r, IM_HW_PUSHED_COL).getValue() === code);
         PUR_COLS.forEach(function (col) { pur.getRange(prow, col).clearContent(); });
       }
       reset();

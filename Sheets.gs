@@ -111,10 +111,12 @@ function createHardwareListSheet_(ss) {
     'Required Qty',         // E
     'In Stock (IMS)',       // F  per-row formula, see _Interlink_Items.gs
     'Unit',                 // G  dropdown
-    'Item Status',          // H  per-row formula: Reserved / Released / Consumed / Ordered (see _Interlink_Items.gs)
-    'Stock Status',         // I  In Stock / Out of Stock — flip drives push to Purchases
-    'Remarks',              // J
-    'Pushed to Purchases'   // K  trigger stamps PUR-code; prevents duplicate push
+    'Reserve?',             // H  checkbox: tick sends the reservation to IMS (see _Interlink_Items.gs)
+    'Item Status',          // I  per-row formula: Reserved / Released / Consumed / Ordered (see _Interlink_Items.gs)
+    'Stock Status',         // J  In Stock / Out of Stock — flip drives push to Purchases
+    'Remarks',              // K
+    'Pushed to Purchases',  // L  trigger stamps PUR-code; prevents duplicate push
+    'IMS Reservation'       // M  reservation request / result text
   ];
   sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   sh.setFrozenRows(1);
@@ -123,9 +125,10 @@ function createHardwareListSheet_(ss) {
   sh.setColumnWidth(1, 90);   sh.setColumnWidth(2, 200);
   sh.setColumnWidth(3, 200);  sh.setColumnWidth(4, 200);
   sh.setColumnWidth(5, 100);  sh.setColumnWidth(6, 110);
-  sh.setColumnWidth(7, 90);   sh.setColumnWidth(8, 150);
-  sh.setColumnWidth(9, 110);  sh.setColumnWidth(10, 220);
-  sh.setColumnWidth(11, 120);
+  sh.setColumnWidth(7, 90);   sh.setColumnWidth(8, 80);
+  sh.setColumnWidth(9, 150);  sh.setColumnWidth(10, 110);
+  sh.setColumnWidth(11, 220); sh.setColumnWidth(12, 120);
+  sh.setColumnWidth(13, 200);
 }
 
 function createPurchasesSheet_(ss) {
@@ -407,7 +410,7 @@ function installDataValidations() {
   // Hardware List
   if (proj) dd(SHEETS.HARDWARE, `B2:B${R}`, proj);
   dd(SHEETS.HARDWARE, `G2:G${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
-  dd(SHEETS.HARDWARE, `I2:I${R}`, ['In Stock','Out of Stock']);
+  dd(SHEETS.HARDWARE, `J2:J${R}`, ['In Stock','Out of Stock']);
 
   // Purchases (Invoice# + Amount removed; PO Issued now Y/N; Variance moved; Status now col M)
   if (proj) dd(SHEETS.PURCHASES, `B2:B${R}`, proj);
@@ -478,7 +481,7 @@ function installFormatting() {
   };
   base(SHEETS.PROJECTS,   17);
   base(SHEETS.MILESTONES, 27);
-  base(SHEETS.HARDWARE,   11);
+  base(SHEETS.HARDWARE,   13);
   base(SHEETS.PURCHASES,  15);
   base(SHEETS.PRODUCTION, 14);
   base(SHEETS.SNAGS,      13);
@@ -573,9 +576,9 @@ function applyAllCF_(ss) {
     ['No',  COLORS.BAD_BG,  COLORS.BAD_FG],
     ['Pending', COLORS.PENDING_BG, COLORS.PENDING_FG]
   ]));
-  // Hardware List: Status (I)
+  // Hardware List: Stock Status (J)
   sh = ss.getSheetByName(SHEETS.HARDWARE);
-  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(`I2:I${R}`), [
+  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(`J2:J${R}`), [
     ['In Stock',     COLORS.DONE_BG, COLORS.DONE_FG],
     ['Out of Stock', COLORS.BAD_BG,  COLORS.BAD_FG]
   ]));
@@ -659,7 +662,7 @@ function applyAllCF_(ss) {
 function applyProjectColorBands_(ss) {
   const targets = [
     [SHEETS.MILESTONES, 'A', 'AA'],
-    [SHEETS.HARDWARE,   'B', 'K'],
+    [SHEETS.HARDWARE,   'B', 'M'],
     [SHEETS.PURCHASES,  'B', 'O'],  // O (15) after In Stock (IMS) was added
     [SHEETS.PRODUCTION, 'B', 'N'],
     [SHEETS.SNAGS,      'B', 'M'],

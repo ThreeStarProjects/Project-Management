@@ -125,12 +125,11 @@ function IM_onOpen_() {
     .addItem('Refresh dropdowns from Masters', 'IM_refreshDropdowns')
     .addItem('Clear Masters cache',            'IM_clearCache')
     .addSeparator()
-    .addItem('Reserve selected rows in IMS',   'IM_reserveSelected')
     .addItem('Refresh reservation status',     'IM_refreshReservationStatus')
     .addSeparator()
     .addItem('About',                          'IM_about_')
     .addToUi();
-  try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col K current on open
+  try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col M current on open
 }
 
 function IM_about_() {
