@@ -84,8 +84,8 @@ function menuOpenProjectView() {
 /**
  * Delete a project from EVERY system (PM, IMS, Finance) and Masters. The work is done by
  * Masters.executeProjectDelete (Masters ProjectDelete.gs): it shows what will go (preview),
- * asks you to type the project ID, copies each removed row to a hidden "_Deleted_Project_Rows"
- * sheet in its own system, then deletes. PM is deleted last so a failure can be re-run.
+ * asks you to type the project ID, then hard-deletes in Finance, IMS, PM and finally Masters
+ * (project record + project-map pairings). PM and Masters go last so a failure can be re-run.
  */
 function menuDeleteProject() {
   const match = findProjectByQuery_();
@@ -106,7 +106,8 @@ function menuDeleteProject() {
     part('Finance', pv.systems.fin) + '\n' + part('IMS', pv.systems.ims) + '\n' + part('PM', pv.systems.pm) +
     (pv.aliases.length ? '\n\nAlso matches IMS/Finance project texts: ' + pv.aliases.join(', ') : '') +
     (notes.length ? '\n\nSkipped: ' + notes.join(', ') : '') +
-    '\n\nEvery removed row is first copied to a hidden "_Deleted_Project_Rows" sheet in its own system.' +
+    '\nMasters: the project record and its project-map pairings.' +
+    '\n\nThis is a HARD delete: nothing is kept and it cannot be undone.' +
     '\nType the project ID (' + match.id + ') to confirm:',
     ui.ButtonSet.OK_CANCEL
   );
@@ -116,7 +117,8 @@ function menuDeleteProject() {
   try { res = Masters.executeProjectDelete(match.id, ss.getId(), match.label, ask.getResponseText()); }
   catch (e) { ui.alert('Nothing was deleted', e.message, ui.ButtonSet.OK); return; }
   reseedArrayFormulas_(ss);  // deleteRow on row 2 can wipe ARRAYFORMULA seeds. Re-install unconditionally.
-  const sum = ['fin', 'ims', 'pm'].map(k => (res.deleted[k] || []).map(x => x.sheet + ' ' + x.n).join(', ')).filter(String).join('\n');
+  const sum = [['Finance', 'fin'], ['IMS', 'ims'], ['PM', 'pm'], ['Masters', 'masters']]
+    .map(([t, k]) => t + ': ' + ((res.deleted[k] || []).filter(x => x.n).map(x => x.sheet + ' ' + x.n).join(', ') || 'nothing')).join('\n');
   ui.alert(res.complete ? '✅ Deleted ' + match.id : '⚠ ' + match.id + ' only partly deleted',
     (sum ? 'Removed:\n' + sum + '\n\n' : '') +
     (res.problems.length ? 'Problems:\n' + res.problems.join('\n') + '\n\nRun Delete project again to finish.' : 'Request ' + res.requestId + '. IMS stock figures refresh within a minute.'),
