@@ -82,47 +82,100 @@ function menuOpenProjectView() {
 }
 
 /**
- * Delete a project from EVERY system (PM, IMS, Finance) and Masters. The work is done by
- * Masters.executeProjectDelete (Masters ProjectDelete.gs): it shows what will go (preview),
- * asks you to type the project ID, then hard-deletes in Finance, IMS, PM and finally Masters
- * (project record + project-map pairings). PM and Masters go last so a failure can be re-run.
+ * Delete a project from EVERY system (PM, IMS, Finance) and Masters, from one dialog:
+ * pick the project from a dropdown → Preview (counts per system) → type the project ID → Delete.
+ * The work is done by Masters.previewProjectDelete / executeProjectDelete (Masters ProjectDelete.gs):
+ * a HARD delete in Finance, IMS, PM and finally Masters (project record + project-map pairings).
+ * PM and Masters go last so a failure can be re-run.
  */
 function menuDeleteProject() {
-  const match = findProjectByQuery_();
-  if (!match) return;
-  const ui = SpreadsheetApp.getUi();
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;font-size:13px;padding:14px">' +
+    '<div id="step1"><p><b>Pick the project to delete from ALL systems</b></p>' +
+    '<select id="p" style="width:100%;padding:7px;font-size:13px"><option value="">Loading projects…</option></select>' +
+    '<p><button id="b1" onclick="preview()" style="padding:7px 16px">Preview what will be deleted</button> ' +
+    '<button onclick="google.script.host.close()" style="padding:7px 16px">Cancel</button></p></div>' +
+    '<div id="step2" style="display:none"><pre id="txt" style="white-space:pre-wrap;background:#f5f5f5;padding:10px;border:1px solid #ccc"></pre>' +
+    '<p style="color:#b00020"><b>HARD delete: nothing is kept and it cannot be undone.</b><br>Type the project ID <b id="idn"></b> to confirm:</p>' +
+    '<input id="typed" style="width:100%;padding:7px;font-size:13px" autocomplete="off">' +
+    '<p><button id="b2" onclick="run()" style="padding:7px 16px;background:#b00020;color:#fff;border:0">Delete everywhere</button> ' +
+    '<button onclick="google.script.host.close()" style="padding:7px 16px">Cancel</button></p></div>' +
+    '<div id="step3" style="display:none"><pre id="res" style="white-space:pre-wrap"></pre>' +
+    '<p><button onclick="google.script.host.close()" style="padding:7px 16px">Close</button></p></div>' +
+    '<p id="err" style="color:#b00020"></p></div>' +
+    '<script>' +
+    'var chosen="";' +
+    'function fail(e){document.getElementById("err").textContent=(e&&e.message)?e.message:String(e);document.getElementById("b1").disabled=false;document.getElementById("b2").disabled=false;}' +
+    'google.script.run.withSuccessHandler(function(list){var s=document.getElementById("p");s.innerHTML="";' +
+    'var o=document.createElement("option");o.value="";o.textContent=list.length?"-- choose a project --":"(no projects)";s.appendChild(o);' +
+    'list.forEach(function(x){var q=document.createElement("option");q.value=x.id;q.textContent=x.id+" — "+x.name;s.appendChild(q);});})' +
+    '.withFailureHandler(fail).getDeleteProjectChoices();' +
+    'function preview(){chosen=document.getElementById("p").value;if(!chosen){fail("Pick a project first.");return;}' +
+    'document.getElementById("err").textContent="";document.getElementById("b1").disabled=true;' +
+    'google.script.run.withSuccessHandler(function(r){document.getElementById("b1").disabled=false;' +
+    'if(r.problems){fail(r.problems);return;}document.getElementById("txt").textContent=r.text;document.getElementById("idn").textContent=chosen;' +
+    'document.getElementById("step1").style.display="none";document.getElementById("step2").style.display="block";})' +
+    '.withFailureHandler(fail).previewDeleteProject(chosen);}' +
+    'function run(){var t=document.getElementById("typed").value;document.getElementById("err").textContent="";document.getElementById("b2").disabled=true;' +
+    'google.script.run.withSuccessHandler(function(r){document.getElementById("step2").style.display="none";document.getElementById("step3").style.display="block";' +
+    'document.getElementById("res").textContent=r.title+"\\n\\n"+r.text;})' +
+    '.withFailureHandler(fail).runDeleteProject(chosen,t);}' +
+    '</script>'
+  ).setWidth(520).setHeight(470);
+  SpreadsheetApp.getUi().showModalDialog(html, '🗑 Delete project everywhere');
+}
+
+/** Dropdown content for the delete dialog: every project in the Projects sheet. */
+function getDeleteProjectChoices() {
+  const proj = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.PROJECTS);
+  if (!proj || proj.getLastRow() < 2) return [];
+  return proj.getRange(2, 1, proj.getLastRow() - 1, 2).getValues()
+    .filter(r => r[0]).map(r => ({ id: String(r[0]), name: String(r[1] || '') }));
+}
+
+/** One project row by ID: { id, name, label } or null. */
+function findProjectById_(id) {
+  const proj = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEETS.PROJECTS);
+  if (!proj || proj.getLastRow() < 2) return null;
+  const data = proj.getRange(2, 1, proj.getLastRow() - 1, 9).getValues();
+  for (let i = 0; i < data.length; i++) {
+    if (String(data[i][0]) === String(id)) return { id: String(data[i][0]), name: String(data[i][1] || ''), label: String(data[i][8] || '') };
+  }
+  return null;
+}
+
+/** Step 2 of the dialog: counts per system, nothing is changed. Returns { text } or { problems }. */
+function previewDeleteProject(id) {
+  const match = findProjectById_(id);
+  if (!match) return { problems: 'Project ' + id + ' not found in PM.' };
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  let pv;
-  try { pv = Masters.previewProjectDelete(match.id, ss.getId(), match.label); }
-  catch (e) { ui.alert('Cannot prepare the delete', e.message, ui.ButtonSet.OK); return; }
-  if (pv.problems.length) { ui.alert('Nothing was deleted', pv.problems.join('\n\n'), ui.ButtonSet.OK); return; }
-
+  const pv = Masters.previewProjectDelete(match.id, ss.getId(), match.label);
+  if (pv.problems.length) return { problems: pv.problems.join('\n\n') + '\n\nNothing was deleted.' };
   const part = (title, list) => title + ': ' + (list.filter(x => x.n).map(x => x.sheet + ' ' + x.n).join(', ') || 'nothing found');
   const notes = [].concat(pv.systems.fin, pv.systems.ims, pv.systems.pm).filter(x => x.note).map(x => x.sheet + ' (' + x.note + ')');
-  const ask = ui.prompt(
-    'Delete ' + match.id + ' everywhere?',
-    'This PERMANENTLY removes ' + match.id + ' — ' + match.name + ' rows from all systems:\n\n' +
+  return { text:
+    'Delete ' + match.id + ' — ' + match.name + ' and these rows:\n\n' +
     part('Finance', pv.systems.fin) + '\n' + part('IMS', pv.systems.ims) + '\n' + part('PM', pv.systems.pm) +
+    '\nMasters: the project record and its project-map pairings' +
     (pv.aliases.length ? '\n\nAlso matches IMS/Finance project texts: ' + pv.aliases.join(', ') : '') +
-    (notes.length ? '\n\nSkipped: ' + notes.join(', ') : '') +
-    '\nMasters: the project record and its project-map pairings.' +
-    '\n\nThis is a HARD delete: nothing is kept and it cannot be undone.' +
-    '\nType the project ID (' + match.id + ') to confirm:',
-    ui.ButtonSet.OK_CANCEL
-  );
-  if (ask.getSelectedButton() !== ui.Button.OK) return;
+    (notes.length ? '\n\nSkipped: ' + notes.join(', ') : '') };
+}
 
-  let res;
-  try { res = Masters.executeProjectDelete(match.id, ss.getId(), match.label, ask.getResponseText()); }
-  catch (e) { ui.alert('Nothing was deleted', e.message, ui.ButtonSet.OK); return; }
+/** Step 3 of the dialog: the real delete. typed must equal the project ID. */
+function runDeleteProject(id, typed) {
+  const match = findProjectById_(id);
+  if (!match) throw new Error('Project ' + id + ' not found in PM.');
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const res = Masters.executeProjectDelete(match.id, ss.getId(), match.label, typed);  // throws if typed != ID
   reseedArrayFormulas_(ss);  // deleteRow on row 2 can wipe ARRAYFORMULA seeds. Re-install unconditionally.
   const sum = [['Finance', 'fin'], ['IMS', 'ims'], ['PM', 'pm'], ['Masters', 'masters']]
     .map(([t, k]) => t + ': ' + ((res.deleted[k] || []).filter(x => x.n).map(x => x.sheet + ' ' + x.n).join(', ') || 'nothing')).join('\n');
-  ui.alert(res.complete ? '✅ Deleted ' + match.id : '⚠ ' + match.id + ' only partly deleted',
-    (sum ? 'Removed:\n' + sum + '\n\n' : '') +
-    (res.problems.length ? 'Problems:\n' + res.problems.join('\n') + '\n\nRun Delete project again to finish.' : 'Request ' + res.requestId + '. IMS stock figures refresh within a minute.'),
-    ui.ButtonSet.OK);
+  return {
+    title: res.complete ? '✅ Deleted ' + match.id : '⚠ ' + match.id + ' only partly deleted',
+    text: 'Removed:\n' + sum + '\n\n' +
+      (res.problems.length ? 'Problems:\n' + res.problems.join('\n') + '\n\nOpen Delete project and run it again to finish.'
+                           : 'Request ' + res.requestId + '. IMS stock figures refresh within a minute.')
+  };
 }
 
 function findProjectByQuery_() {
