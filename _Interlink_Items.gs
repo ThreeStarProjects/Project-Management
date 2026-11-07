@@ -254,6 +254,8 @@ function IM_say_(msg) {
  *  - Material (C) picked  → fill Unit if blank (Hardware G, Purchases H).
  *  - Hardware List "Reserve?" (H) ticked → IM_autoEvaluateHardwareRow_ for that row
  *    (Stock Status set, reservation queued, shortfall pushed to Purchases).
+ *  - Hardware List Project (B), Material (C) or Required Qty (E) edited → IM_refreshStockStatus_ for that row
+ *    (Stock Status fills itself for unticked rows; see _Interlink_HardwareFlow.gs).
  */
 function IM_onHardwareItemEdit_(e) {
   try {
@@ -264,6 +266,7 @@ function IM_onHardwareItemEdit_(e) {
     var col = r.getColumn();
     if (col === IM_MAT_COL) IM_fillUnit_(e, sh, t, r);
     if (t.name === SHEETS.HARDWARE && col === IM_HW_RESERVE_COL && r.getValue() === true) IM_onReserveTicked_(e, sh, r.getRow());
+    if (t.name === SHEETS.HARDWARE && (col === 2 || col === IM_MAT_COL || col === 5)) IM_refreshStockStatus_([r.getRow()]);  // Stock Status fills itself
   } catch (err) {
     Logger.log('IM_onHardwareItemEdit_ error: ' + err.message);
   }

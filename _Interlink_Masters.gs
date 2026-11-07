@@ -126,10 +126,12 @@ function IM_onOpen_() {
     .addItem('Clear Masters cache',            'IM_clearCache')
     .addSeparator()
     .addItem('Refresh reservation status',     'IM_refreshReservationStatus')
+    .addItem('Refresh stock status',           'IM_refreshStockStatusNow')
     .addSeparator()
     .addItem('About',                          'IM_about_')
     .addToUi();
   try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col M current on open
+  try { IM_refreshStockStatus_(null); } catch (e) {}        // keep Stock Status (col J) of unticked rows current on open
 }
 
 function IM_about_() {

@@ -27,6 +27,69 @@ function IM_decideHardwareRow_(req, stock) {
   return { status: buy > 0 ? 'Out of Stock' : 'In Stock', reserveQty: reserve, purchaseQty: buy };
 }
 
+// -----------------------------------------------------------------------------
+// Stock Status (col J) fills itself for rows that are not yet ticked / reserved / ordered:
+//   IMS item with Project, Material and Required Qty filled → "In Stock" if the free stock (col F =
+//   IMS Available, i.e. already net of every reservation) covers the Required Qty, else "Out of Stock".
+// It only ever writes the cell; nothing is reserved or ordered until Reserve? is ticked (script writes do
+// not fire the Out-of-Stock → Purchases rule). Runs when B / C / E of a row is edited, when PM opens and
+// from 🔗 Interlink → Refresh stock status. A row with a tick, a reservation (M) or a Purchases link (L)
+// is never touched. A value the user chose by hand is respected: the script remembers what it wrote
+// (hidden sheet _IMS_Items, T = Hardware ID, U = value) and only overwrites a cell that is blank or
+// still holds its own value.
+// -----------------------------------------------------------------------------
+var IM_AUTO_ID_COL  = 20;  // T on _IMS_Items
+var IM_AUTO_VAL_COL = 21;  // U on _IMS_Items
+
+/** Pure rule. '' = no opinion (free-text material, or Required Qty / stock not usable). */
+function IM_stockStatusFor_(req, stock) {
+  if (!(req > 0) || typeof stock !== 'number') return '';
+  return stock >= req ? 'In Stock' : 'Out of Stock';
+}
+
+/** only = null (every row) or [row numbers]. Returns how many Stock Status cells were changed. */
+function IM_refreshStockStatus_(only) {
+  var ss = SpreadsheetApp.getActive();
+  var hw = ss.getSheetByName(SHEETS.HARDWARE), it = ss.getSheetByName(IM_ITEMS_SHEET);
+  if (!hw || !it || hw.getLastRow() < 2) return 0;
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(10000)) return 0;
+  try {
+    if (it.getMaxColumns() < IM_AUTO_VAL_COL) it.insertColumnsAfter(it.getMaxColumns(), IM_AUTO_VAL_COL - it.getMaxColumns());
+    SpreadsheetApp.flush();  // let the In Stock formula settle before reading it
+    var n = hw.getLastRow() - 1;
+    var v = hw.getRange(2, 1, n, IM_HW_RSV_COL).getValues();
+    var ml = it.getLastRow(), mine = {};  // Hardware ID → value this script last wrote
+    if (ml >= 2) it.getRange(2, IM_AUTO_ID_COL, ml - 1, 2).getValues().forEach(function (r) { if (r[0] !== '') mine[r[0]] = r[1]; });
+    var want = null;
+    if (only) { want = {}; only.forEach(function (r) { want[r] = true; }); }
+
+    var changed = 0, keep = [];
+    v.forEach(function (r, i) {
+      var id = r[0], cur = r[IM_HW_STATUS_COL - 1];
+      if (!id) return;
+      if (r[IM_HW_RESERVE_COL - 1] === true || r[IM_HW_PUSHED_COL - 1] || r[IM_HW_RSV_COL - 1]) return;  // decided: hands off
+      var owned = cur === '' || (mine[id] !== undefined && cur === mine[id]);  // blank, or still the script's own value
+      if (!owned) return;                                                       // chosen by hand: respect it
+      var target = (r[1] && r[2]) ? IM_stockStatusFor_(Number(r[4]), r[5]) : '';
+      if ((!want || want[i + 2]) && target && cur !== target) { r[IM_HW_STATUS_COL - 1] = target; cur = target; changed++; }
+      if (cur !== '') keep.push([id, cur]);
+    });
+    if (changed) hw.getRange(2, IM_HW_STATUS_COL, n, 1).setValues(v.map(function (r) { return [r[IM_HW_STATUS_COL - 1]]; }));
+    if (ml >= 2) it.getRange(2, IM_AUTO_ID_COL, ml - 1, 2).clearContent();
+    if (keep.length) it.getRange(2, IM_AUTO_ID_COL, keep.length, 2).setValues(keep);
+    return changed;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Menu action. */
+function IM_refreshStockStatusNow() {
+  var n = IM_refreshStockStatus_(null);
+  SpreadsheetApp.getActive().toast(n ? 'Stock Status updated on ' + n + ' row(s).' : 'Stock Status already up to date.', '🔗 Interlink', 5);
+}
+
 /** Evaluate one Hardware row. Returns a short result line ("skipped: …" when nothing was done). */
 function IM_autoEvaluateHardwareRow_(sh, row) {
   var lock = LockService.getDocumentLock();
