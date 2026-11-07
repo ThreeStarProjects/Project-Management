@@ -1,15 +1,18 @@
 /**
  * _Interlink_PushProjects.gs  (PM only)
  * -----------------------------------------------------------------------------
- * Reads PM's Projects sheet and upserts every project into Masters.
- * Masters uses the SAME PRJ-### as PM — passed in the payload, so repeated
- * pushes are idempotent (same ID → update, not duplicate).
+ * Keeps Masters' Projects in step with PM's Projects sheet. Masters uses the SAME
+ * PRJ-### as PM (passed in the payload), so every push is an upsert: same ID → update.
  *
- * Depends on _Interlink_Masters.gs being pasted first (for the Masters library
- * dependency and IM_clearCache cache-bust).
+ * It runs by itself:
+ *   - right after ➕ Add Project (menuAddProject),
+ *   - every time PM opens (installable onOpen, IM_onOpen_), so a missed push heals itself.
+ * Only projects Masters lacks, or whose name / active flag differ, are sent, so opening PM
+ * writes nothing when everything is already in step. Projects removed from PM are NOT
+ * removed from Masters here (the cross-system Delete project does that).
+ * 🔗 Interlink → "Send all projects to Masters" does the same on demand and reports.
  *
- * Usage: run IM_pushAllProjectsToMasters() from the Script editor's Run menu,
- * or wire it to a menu item once you want it one-click.
+ * Depends on _Interlink_Masters.gs (Masters library + IM_clearCache).
  *
  * Mappings (PM column → Masters field):
  *   Project ID      → Project_ID        (upsert key)
@@ -25,91 +28,79 @@
  *   Overall Status=Completed → Active?=No
  */
 
-function IM_pushAllProjectsToMasters() {
-  var ss = SpreadsheetApp.getActive();
-  var sh = ss.getSheetByName('Projects');
-  if (!sh) {
-    SpreadsheetApp.getUi().alert('Projects sheet not found in PM.');
-    return;
-  }
-  var last = sh.getLastRow();
-  if (last < 2) {
-    SpreadsheetApp.getUi().alert('No projects in PM to push.');
-    return;
-  }
+/** One PM project row (columns A–H) → Masters payload, or null for a blank row. */
+function IM_projectPayload_(r, tz) {
+  var projectId = String(r[0] || '').trim();
+  var name      = String(r[1] || '').trim();
+  if (!projectId || !name) return null;
 
-  // Columns A–H are the user-editable project fields; I–Q are formulas we skip.
-  var rows = sh.getRange(2, 1, last - 1, 8).getValues();
+  var client   = String(r[2] || '').trim();
+  var location = String(r[3] || '').trim();
+  var startDt  = r[4];
+  var handover = r[5];
+  var pmStatus = String(r[6] || '').trim();
+  var remarks  = String(r[7] || '').trim();
 
-  var pushed = 0, skipped = 0, errors = [];
-  var tz = Session.getScriptTimeZone();
-
-  rows.forEach(function (r, i) {
-    var projectId = String(r[0] || '').trim();
-    var name      = String(r[1] || '').trim();
-    if (!projectId || !name) { skipped++; return; }
-
-    var client   = String(r[2] || '').trim();
-    var location = String(r[3] || '').trim();
-    var startDt  = r[4];
-    var handover = r[5];
-    var pmStatus = String(r[6] || '').trim();
-    var remarks  = String(r[7] || '').trim();
-
-    // Status map
-    var statusMap = {
-      'In Progress': 'In Progress',
-      'At Risk':     'In Progress',   // closest active, see Masters SCHEMA
-      'Completed':   'Delivered'
-    };
-    var mStatus = statusMap[pmStatus] || 'Enquiry';
-    var isActive = pmStatus !== 'Completed';
-
-    // Resolve Client name → Customer_ID (blank if no match)
-    var customerId = '';
-    if (client) {
-      try {
-        var hit = Masters.resolveFreeformName('customer', client);
-        if (hit) customerId = hit.id;
-      } catch (e) {}
-    }
-
-    // Date coercion (Masters CRUD coerces again on save, but formatting here
-    // keeps Date objects from being lost over google.script.run boundaries)
-    var startStr    = startDt  instanceof Date ? Utilities.formatDate(startDt,  tz, 'yyyy-MM-dd') : '';
-    var handoverStr = handover instanceof Date ? Utilities.formatDate(handover, tz, 'yyyy-MM-dd') : '';
-
-    // Notes = Location + Remarks (if any)
-    var notes = [
-      location && ('Location: ' + location),
-      remarks
-    ].filter(Boolean).join(' · ');
-
-    var payload = {
-      Project_ID:      projectId,
-      Name:            name,
-      Customer_ID:     customerId,
-      Start_Date:      startStr,
-      Target_Handover: handoverStr,
-      Status:          mStatus,
-      Notes:           notes,
-      'Active?':       isActive ? 'Yes' : 'No'
-    };
-
+  var statusMap = {
+    'In Progress': 'In Progress',
+    'At Risk':     'In Progress',   // closest active, see Masters SCHEMA
+    'Completed':   'Delivered'
+  };
+  var customerId = '';
+  if (client) {
     try {
-      Masters.createProject(payload);   // upsert — Masters uses Project_ID as key
-      pushed++;
-    } catch (e) {
-      errors.push('Row ' + (i + 2) + ' (' + projectId + '): ' + e.message);
-    }
+      var hit = Masters.resolveFreeformName('customer', client);
+      if (hit) customerId = hit.id;
+    } catch (e) {}
+  }
+  var notes = [location && ('Location: ' + location), remarks].filter(Boolean).join(' · ');
+  return {
+    Project_ID:      projectId,
+    Name:            name,
+    Customer_ID:     customerId,
+    Start_Date:      startDt  instanceof Date ? Utilities.formatDate(startDt,  tz, 'yyyy-MM-dd') : '',
+    Target_Handover: handover instanceof Date ? Utilities.formatDate(handover, tz, 'yyyy-MM-dd') : '',
+    Status:          statusMap[pmStatus] || 'Enquiry',
+    Notes:           notes,
+    'Active?':       pmStatus !== 'Completed' ? 'Yes' : 'No'
+  };
+}
+
+/**
+ * Send to Masters every PM project Masters lacks or has under another name / active flag.
+ * Returns { pushed, skipped, errors[] }. Never shows UI.
+ */
+function IM_syncProjectsToMasters_() {
+  var out = { pushed: 0, skipped: 0, errors: [] };
+  var sh = SpreadsheetApp.getActive().getSheetByName('Projects');
+  if (!sh || sh.getLastRow() < 2) return out;
+  var tz = Session.getScriptTimeZone();
+  var there = {};  // what Masters already has: PRJ-### → { name, active }
+  (Masters.getProjects() || []).forEach(function (p) {
+    there[String(p.Project_ID).toUpperCase()] = { name: String(p.Name), active: String(p['Active?'] || 'Yes') };
   });
+  // Columns A–H are the user-editable project fields; I–Q are formulas we skip.
+  sh.getRange(2, 1, sh.getLastRow() - 1, 8).getValues().forEach(function (r, i) {
+    var payload = IM_projectPayload_(r, tz);
+    if (!payload) { out.skipped++; return; }
+    var m = there[payload.Project_ID.toUpperCase()];
+    if (m && m.name === payload.Name && m.active === payload['Active?']) return;   // already in step
+    try { Masters.createProject(payload); out.pushed++; }                           // upsert on Project_ID
+    catch (e) { out.errors.push('Row ' + (i + 2) + ' (' + payload.Project_ID + '): ' + e.message); }
+  });
+  if (out.pushed) { try { IM_clearCache(); } catch (e) {} }   // IM_getProjects() must see the change next call
+  return out;
+}
 
-  // Bust the local cache so IM_getProjects() returns fresh data next call
-  try { IM_clearCache(); } catch (e) {}
-
-  var msg = 'Pushed to Masters:\n' +
-    '  pushed/updated: ' + pushed + '\n' +
-    '  blank rows (skipped): ' + skipped +
-    (errors.length ? '\n\n  errors (' + errors.length + '):\n    ' + errors.slice(0, 10).join('\n    ') : '');
-  SpreadsheetApp.getUi().alert(msg);
+/** Menu / editor: send everything now and say what happened. */
+function IM_pushAllProjectsToMasters() {
+  var ui = SpreadsheetApp.getUi();
+  var sh = SpreadsheetApp.getActive().getSheetByName('Projects');
+  if (!sh) { ui.alert('Projects sheet not found in PM.'); return; }
+  if (sh.getLastRow() < 2) { ui.alert('No projects in PM to push.'); return; }
+  var res = IM_syncProjectsToMasters_();
+  ui.alert('Pushed to Masters:\n' +
+    '  new or changed: ' + res.pushed + '\n' +
+    '  blank rows (skipped): ' + res.skipped +
+    (res.errors.length ? '\n\n  errors (' + res.errors.length + '):\n    ' + res.errors.slice(0, 10).join('\n    ') : '\n\nEverything else was already in step.'));
 }

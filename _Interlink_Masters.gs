@@ -124,12 +124,14 @@ function IM_onOpen_() {
   ui.createMenu('🔗 Interlink')
     .addItem('Refresh dropdowns from Masters', 'IM_refreshDropdowns')
     .addItem('Clear Masters cache',            'IM_clearCache')
+    .addItem('Send all projects to Masters',   'IM_pushAllProjectsToMasters')
     .addSeparator()
     .addItem('Refresh reservation status',     'IM_refreshReservationStatus')
     .addItem('Refresh stock status',           'IM_refreshStockStatusNow')
     .addSeparator()
     .addItem('About',                          'IM_about_')
     .addToUi();
+  try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
   try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col M current on open
   try { IM_refreshStockStatus_(null); } catch (e) {}        // keep Stock Status (col J) of unticked rows current on open
 }

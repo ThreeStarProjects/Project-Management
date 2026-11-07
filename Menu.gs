@@ -43,6 +43,7 @@ function menuAddProject() {
   const name = (r.getResponseText() || '').trim();
   if (!name) { ui.alert('Name required.'); return; }
   const id = addProject_(name);
+  try { IM_syncProjectsToMasters_(); } catch (e) {}  // Masters (and so IMS / Finance) learn the project right away
   // Also seed a Milestones row so % Done starts computing
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const mile = ss.getSheetByName(SHEETS.MILESTONES);
