@@ -122,6 +122,7 @@ function IM_installInterlinkMenu() {
 function IM_onOpen_() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('🔗 Interlink')
+    .addItem('➕ Add item to IMS',             'IM_addItemDialog')
     .addItem('Refresh dropdowns from Masters', 'IM_refreshDropdowns')
     .addItem('Clear Masters cache',            'IM_clearCache')
     .addItem('Send all projects to Masters',   'IM_pushAllProjectsToMasters')

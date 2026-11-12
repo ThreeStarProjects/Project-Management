@@ -949,3 +949,97 @@ function IM_selfTestAnnounce_() {
   SpreadsheetApp.getActive().toast(msg + ' (see the "' + ST_REPORT + '" sheet)', '🧪 Self-test', 20);
   props.deleteProperty('IM_SELFTEST_MSG');
 }
+
+// =============================================================================
+// ➕ ADD ITEM TO IMS  (🔗 Interlink → Add item to IMS)
+// Creates a new Item Master row in IMS from PM, without opening IMS. PM cannot run IMS code, so the dialog leaves
+// a command in IMS's hidden sheet _PM_Commands and IMS's 1-minute trigger runs the REAL addItem() there (same
+// checks, duplicate detection and item-code numbering as the IMS form). The dialog waits for the answer and
+// shows the new code. The item shows up in the Material dropdown after the hidden _IMS_Items list refreshes
+// (a few minutes). Opening stock is not set here: it arrives with a GRN or an opening adjustment in IMS.
+// =============================================================================
+var IM_CMD_SHEET = '_PM_Commands';
+
+/** The three lists IMS validates against (Dropdowns A = category, C = material type, E = UOM). */
+function IM_addItemLists() {
+  var dd = SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName('Dropdowns');
+  if (!dd) throw new Error('IMS has no Dropdowns sheet');
+  var col = function (c) {
+    if (dd.getLastRow() < 2) return [];
+    return dd.getRange(2, c, dd.getLastRow() - 1, 1).getValues().map(function (r) { return String(r[0]).trim(); }).filter(String);
+  };
+  return { categories: col(1), materialTypes: col(3), uoms: col(5) };
+}
+
+/** Validate and queue the item. d = { itemName, size, grade, uom, category, materialType, avgRate, forceCreate }. Returns { row }. */
+function IM_addItemSubmit(d) {
+  var lists = IM_addItemLists();
+  var name = String(d.itemName || '').trim();
+  if (!name) throw new Error('Item name is required.');
+  if (name.length > 120) throw new Error('Item name is too long (max 120 characters).');
+  if (lists.uoms.indexOf(d.uom) < 0) throw new Error('Unit "' + d.uom + '" is not in the IMS list.');
+  if (lists.categories.indexOf(d.category) < 0) throw new Error('Category "' + d.category + '" is not in the IMS list.');
+  if (lists.materialTypes.indexOf(d.materialType) < 0) throw new Error('Material type "' + d.materialType + '" is not in the IMS list.');
+  var rate = d.avgRate === '' || d.avgRate == null ? 0 : Number(d.avgRate);
+  if (isNaN(rate) || rate < 0) throw new Error('Avg rate must be a number, 0 or more.');
+  var params = { itemName: name, size: String(d.size || '').trim(), grade: String(d.grade || '').trim(), uom: d.uom,
+                 category: d.category, materialType: d.materialType, avgRate: rate, forceCreate: d.forceCreate === true };
+  var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), sh = ims.getSheetByName(IM_CMD_SHEET);
+  if (!sh) {
+    sh = ims.insertSheet(IM_CMD_SHEET);
+    sh.getRange(1, 1, 1, 7).setValues([['Id', 'Action', 'Params', 'Status', 'Result', 'By', 'At']]);
+    sh.hideSheet();
+  }
+  var row = Math.max(sh.getLastRow(), 1) + 1;
+  sh.getRange(row, 1, 1, 7).setValues([['PMC-' + row, 'addItem', JSON.stringify(params), 'Pending', '',
+    Session.getActiveUser().getEmail() || 'unknown', new Date()]]);
+  return { row: row };
+}
+
+/** What happened to a queued item: { status: Pending | Done | Error, result: {success, message, code, duplicate, existingCode, existingDesc} }. */
+function IM_addItemPoll(row) {
+  var sh = SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName(IM_CMD_SHEET);
+  if (!sh) throw new Error('IMS command sheet not found');
+  var r = sh.getRange(Number(row), 1, 1, 5).getValues()[0], result = null;
+  if (r[3] !== 'Pending' && r[4]) { try { result = JSON.parse(r[4]); } catch (e) { result = { success: false, message: String(r[4]) }; } }
+  return { status: String(r[3]), result: result };
+}
+
+function IM_addItemDialog() {
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;font-size:13px;padding:14px">' +
+    '<div id="form"><p style="margin-top:0"><b>Add a new item to IMS</b><br><span style="color:#555">It is created in IMS Item Master and shows in the Material dropdown in a few minutes.</span></p>' +
+    '<label>Item name *</label><input id="name" style="width:100%;padding:6px;margin:3px 0 8px" maxlength="120">' +
+    '<table style="width:100%"><tr><td style="width:50%;padding-right:6px"><label>Size</label><input id="size" style="width:100%;padding:6px;margin:3px 0 8px"></td>' +
+    '<td><label>Grade / colour</label><input id="grade" style="width:100%;padding:6px;margin:3px 0 8px"></td></tr>' +
+    '<tr><td style="padding-right:6px"><label>Unit *</label><select id="uom" style="width:100%;padding:6px;margin:3px 0 8px"></select></td>' +
+    '<td><label>Avg rate (optional)</label><input id="rate" type="number" min="0" step="any" style="width:100%;padding:6px;margin:3px 0 8px"></td></tr></table>' +
+    '<label>Category *</label><select id="cat" style="width:100%;padding:6px;margin:3px 0 8px"></select>' +
+    '<label>Material type *</label><select id="mtype" style="width:100%;padding:6px;margin:3px 0 8px"></select>' +
+    '<p><button id="go" onclick="send(false)" style="padding:7px 18px;background:#1F4E79;color:#fff;border:0">Add to IMS</button> ' +
+    '<button onclick="google.script.host.close()" style="padding:7px 18px">Cancel</button></p></div>' +
+    '<div id="wait" style="display:none"><p id="waittxt"></p></div>' +
+    '<div id="done" style="display:none"><p id="donetxt" style="white-space:pre-wrap"></p><p id="dupbtn" style="display:none">' +
+    '<button onclick="send(true)" style="padding:7px 18px">Create anyway</button> </p>' +
+    '<p><button onclick="google.script.host.close()" style="padding:7px 18px">Close</button></p></div>' +
+    '<p id="err" style="color:#b00020"></p></div>' +
+    '<script>' +
+    'function el(i){return document.getElementById(i);}' +
+    'function fail(e){el("err").textContent=(e&&e.message)?e.message:String(e);el("go").disabled=false;}' +
+    'function fill(id,list){var s=el(id);s.innerHTML="";var o=document.createElement("option");o.value="";o.textContent="-- select --";s.appendChild(o);' +
+    'list.forEach(function(x){var q=document.createElement("option");q.value=x;q.textContent=x;s.appendChild(q);});}' +
+    'google.script.run.withSuccessHandler(function(l){fill("uom",l.uoms);fill("cat",l.categories);fill("mtype",l.materialTypes);}).withFailureHandler(fail).IM_addItemLists();' +
+    'function send(force){el("err").textContent="";var d={itemName:el("name").value,size:el("size").value,grade:el("grade").value,uom:el("uom").value,category:el("cat").value,materialType:el("mtype").value,avgRate:el("rate").value,forceCreate:force};' +
+    'if(!d.itemName.trim()||!d.uom||!d.category||!d.materialType){fail("Fill the item name, unit, category and material type.");return;}' +
+    'el("go").disabled=true;google.script.run.withSuccessHandler(function(r){wait(r.row,0);}).withFailureHandler(fail).IM_addItemSubmit(d);}' +
+    'function wait(row,n){el("form").style.display="none";el("done").style.display="none";el("wait").style.display="block";' +
+    'el("waittxt").textContent="Sent to IMS, waiting for it to be created ("+(n*4)+"s). IMS picks it up within a minute.";' +
+    'if(n>40){finish("IMS has not processed it yet. Check that IMS is running its 1-minute trigger (IMS: Interlink > Process PM reservation requests now), then try again.",false);return;}' +
+    'setTimeout(function(){google.script.run.withSuccessHandler(function(p){if(p.status==="Pending"){wait(row,n+1);return;}' +
+    'var r=p.result||{};if(r.success){finish("Added "+r.code+"\\n"+r.message+"\\n\\nIt appears in the Material dropdown within a few minutes.",false);}' +
+    'else if(r.duplicate){finish(r.message+"\\n\\nIf this really is a different item, create it anyway.",true);}else{finish("Not added: "+(r.message||"unknown error"),false);}}).withFailureHandler(fail).IM_addItemPoll(row);},4000);}' +
+    'function finish(t,dup){el("wait").style.display="none";el("done").style.display="block";el("donetxt").textContent=t;el("dupbtn").style.display=dup?"block":"none";}' +
+    '</script>'
+  ).setWidth(470).setHeight(560);
+  SpreadsheetApp.getUi().showModalDialog(html, '➕ Add item to IMS');
+}
