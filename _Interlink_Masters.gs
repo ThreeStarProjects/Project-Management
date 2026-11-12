@@ -135,6 +135,7 @@ function IM_onOpen_() {
     .addSeparator()
     .addItem('About',                          'IM_about_')
     .addToUi();
+  try { IM_removeDuplicateTriggers_(); } catch (e) {}       // a doubled edit trigger would run every edit twice
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col M current on open

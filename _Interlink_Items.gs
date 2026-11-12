@@ -245,6 +245,21 @@ function IM_installReserveCheckbox() {
 }
 
 var IM_QUIET_ = false;  // set by the self-test: log instead of popping up dialogs
+/**
+ * Keep exactly ONE trigger for each of PM's edit / open handlers. A second copy makes every edit run the
+ * same code twice (guards stop double reservations, but it is wasted work and doubled toasts).
+ * Runs on open and in the self-test. Returns how many extra triggers were removed.
+ */
+function IM_removeDuplicateTriggers_() {
+  var KEEP = { onEditHandler: 1, IM_onHardwareItemEdit_: 1, IM_onOpen_: 1 }, seen = {}, removed = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var h = t.getHandlerFunction();
+    if (!KEEP[h]) return;
+    if (seen[h]) { ScriptApp.deleteTrigger(t); removed++; } else seen[h] = true;
+  });
+  return removed;
+}
+
 function IM_say_(msg) {
   if (IM_QUIET_) { Logger.log(msg); return; }
   try { SpreadsheetApp.getUi().alert('Items', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
@@ -537,6 +552,9 @@ function ST_preflight_(st) {
     }
   } catch (e) { ST_log_(A, 'Finance reachable', 'FAIL', e.message); }
 
+  var dupes = IM_removeDuplicateTriggers_();
+  if (dupes) ST_log_(A, 'No duplicate PM triggers', 'WARN', dupes + ' duplicate trigger(s) were installed (every edit ran twice); the extra copy was removed');
+  else ST_log_(A, 'No duplicate PM triggers (each edit runs once)', 'PASS', '');
   var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
   ST_chk_(A, 'PM: edit triggers installed (onEditHandler, IM_onHardwareItemEdit_)', handlers.indexOf('onEditHandler') >= 0 && handlers.indexOf('IM_onHardwareItemEdit_') >= 0, handlers.join(', '));
   var it = ss.getSheetByName(IM_ITEMS_SHEET), a2 = it ? String(it.getRange('A2').getDisplayValue()) : '';
