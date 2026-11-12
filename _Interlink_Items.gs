@@ -244,7 +244,9 @@ function IM_installReserveCheckbox() {
   IM_installItemStatus();
 }
 
+var IM_QUIET_ = false;  // set by the self-test: log instead of popping up dialogs
 function IM_say_(msg) {
+  if (IM_QUIET_) { Logger.log(msg); return; }
   try { SpreadsheetApp.getUi().alert('Items', msg, SpreadsheetApp.getUi().ButtonSet.OK); }
   catch (e) { Logger.log(msg); }  // run from editor: no UI context
 }
@@ -429,4 +431,503 @@ function IM_verifyItemStatus() {
   Logger.log(out.join('\n'));
   IM_say_(out.join('\n'));
   return out;
+}
+
+// =============================================================================
+// SYSTEM SELF-TEST  (🔗 Interlink → Run system self-test)
+// -----------------------------------------------------------------------------
+// Walks the whole chain on LIVE data with a throw-away project "ZZ-SELFTEST …" and deletes it at the end
+// (the real cross-system project delete). Runs as steps advanced by a 1-minute trigger, so it can wait for
+// IMS (1-min trigger) and Finance (10-min trigger) without hitting the 6-minute limit; ~15 minutes in all.
+//   preflight → project + deadlines → Masters → pick IMS items → Hardware rows (stock status) → reserve
+//   (+ Purchases shortfall, double-tick guard) → IMS reservation → statuses → requisition #1 (partial)
+//   → requisitions #2 + direct issue → Finance import → cleanup (delete everywhere) → report.
+// Everything is logged to the visible sheet "Self-test report" as PASS / FAIL / WARN / INFO with the exact
+// error text. Safety: nothing is posted or deleted unless the project name contains ZZ-SELFTEST; IMS only
+// accepts self-test requisitions for such projects (qty 1-5); the cleanup stops if the delete preview shows
+// more than a handful of rows. Limits: typing in cells (onEdit) is not simulated; only the trigger's existence
+// is checked. It burns a few document numbers (REQ / RSV / COST) for good.
+// =============================================================================
+var ST_PROP = 'IM_SELFTEST';
+var ST_REPORT = 'Self-test report';
+var ST_FN = 'IM_selfTestTick';
+var ST_TAG = 'ZZ-SELFTEST';
+var ST_CMD = '_SelfTest_Cmd';
+
+function ST_load_() {
+  var raw = PropertiesService.getScriptProperties().getProperty(ST_PROP);
+  return raw ? JSON.parse(raw) : null;
+}
+function ST_save_(st) { PropertiesService.getScriptProperties().setProperty(ST_PROP, JSON.stringify(st)); }
+
+function ST_reportSheet_(fresh) {
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(ST_REPORT);
+  if (!sh) sh = ss.insertSheet(ST_REPORT);
+  if (fresh) {
+    sh.clear();
+    sh.getRange(1, 1, 1, 5).setValues([['Self-test', '', '', '', '']]).setFontWeight('bold').setFontSize(13);
+    sh.getRange(3, 1, 1, 5).setValues([['Time', 'Area', 'Check', 'Result', 'Detail']]).setFontWeight('bold').setBackground('#1F3864').setFontColor('#FFFFFF');
+    sh.setFrozenRows(3);
+    sh.setColumnWidth(1, 70); sh.setColumnWidth(2, 130); sh.setColumnWidth(3, 380); sh.setColumnWidth(4, 70); sh.setColumnWidth(5, 620);
+  }
+  return sh;
+}
+
+/** One report line. result: PASS | FAIL | WARN | INFO | SKIP. Returns true for PASS. */
+function ST_log_(area, check, result, detail) {
+  var sh = ST_reportSheet_(false), row = Math.max(sh.getLastRow() + 1, 4);
+  sh.getRange(row, 1, 1, 5).setValues([[Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'HH:mm:ss'), area, check, result, String(detail === undefined ? '' : detail)]]);
+  var color = { PASS: '#C6EFCE', FAIL: '#FFC7CE', WARN: '#FFEB9C', INFO: '#DDEBF7', SKIP: '#EDEDED' }[result];
+  if (color) sh.getRange(row, 4).setBackground(color);
+  return result === 'PASS';
+}
+function ST_chk_(area, check, ok, detail) { return ST_log_(area, check, ok ? 'PASS' : 'FAIL', detail); }
+
+function ST_ims_() { return SpreadsheetApp.openById(IM_IMS_SHEET_ID); }
+function ST_finBook_() {
+  var id = Masters.getSystemSheetIds().finance;
+  if (!id) throw new Error('Finance has not registered its spreadsheet with Masters yet (open Finance once)');
+  return SpreadsheetApp.openById(id);
+}
+function ST_pad_(n) { return (n < 10 ? '00' : n < 100 ? '0' : '') + n; }
+function ST_date_(offsetDays) { var d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + offsetDays); return d; }
+function ST_dstr_(v) { return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v).slice(0, 10); }
+function ST_close_(a, b, tol) { return Math.abs(Number(a) - Number(b)) <= (tol === undefined ? 0.001 : tol); }
+
+/** Heartbeat text → minutes since it was written ("… dd/MM HH:mm[:ss] …"), or -1 when unreadable. */
+function ST_heartbeatAge_(text, tz) {
+  var m = /(\d\d)\/(\d\d) (\d\d):(\d\d)(?::(\d\d))?/.exec(String(text));
+  if (!m) return -1;
+  var yr = Utilities.formatDate(new Date(), tz, 'yyyy');
+  var when = Utilities.parseDate(yr + '-' + m[2] + '-' + m[1] + ' ' + m[3] + ':' + m[4] + ':' + (m[5] || '00'), tz, 'yyyy-MM-dd HH:mm:ss');
+  return (Date.now() - when.getTime()) / 60000;
+}
+
+function ST_runChecks_(area, lines) {
+  (lines || []).forEach(function (l) {
+    var s = String(l), pass = /^PASS/.test(s);
+    ST_log_(area, s.replace(/^(PASS|FAIL)\s+/, ''), pass ? 'PASS' : 'FAIL', '');
+  });
+}
+
+// ---------------------------------------------------------------- steps (true = finished, false = keep waiting)
+
+function ST_preflight_(st) {
+  var A = 'Setup', ss = SpreadsheetApp.getActive();
+  try { ST_log_(A, 'Masters library reachable', 'PASS', 'version ' + Masters.getVersion() + ', ' + (Masters.getProjects() || []).length + ' project(s)'); }
+  catch (e) { ST_log_(A, 'Masters library reachable', 'FAIL', e.message); }
+
+  var ims = null;
+  try {
+    ims = ST_ims_();
+    var reg = ims.getSheetByName('Reservation Register');
+    ST_chk_(A, 'IMS: Reservation Register has the Request ID column (PM requests can be queued)', !!reg && reg.getRange(1, 16).getValue() === 'Request ID', '');
+    ST_chk_(A, 'IMS: Material Requisition Register and Item Master exist', !!ims.getSheetByName('Material Requisition Register') && !!ims.getSheetByName('Item Master'), '');
+    var hb = reg ? String(reg.getRange('Q1').getValue()) : '', age = ST_heartbeatAge_(hb, 'Asia/Kolkata'), tr = /triggers: (\d+)/.exec(hb);
+    ST_chk_(A, 'IMS: 1-minute reservation trigger is running (heartbeat < 5 min old)', age >= 0 && age < 5 && !!tr && Number(tr[1]) >= 1, hb || 'no heartbeat text');
+  } catch (e) { ST_log_(A, 'IMS reachable', 'FAIL', e.message); }
+
+  try {
+    var ids = Masters.getSystemSheetIds();
+    ST_chk_(A, 'Finance and IMS have registered their spreadsheet ids with Masters', !!ids.finance && !!ids.ims, 'finance: ' + (ids.finance ? 'yes' : 'NO (open Finance once)'));
+    if (ids.finance) {
+      var fin = SpreadsheetApp.openById(ids.finance), log = fin.getSheetByName('IMS_Cost_Log');
+      var fhb = log ? String(log.getRange('M1').getValue()) : '', fage = ST_heartbeatAge_(fhb, 'Asia/Kolkata'), ftr = /triggers: (\d+)/.exec(fhb);
+      ST_chk_(A, 'Finance: 10-minute IMS cost import is running (last run < 25 min ago)', fage >= 0 && fage < 25 && !!ftr && Number(ftr[1]) >= 1, fhb || 'no IMS_Cost_Log heartbeat: run IM_installImportTrigger() in Finance');
+    }
+  } catch (e) { ST_log_(A, 'Finance reachable', 'FAIL', e.message); }
+
+  var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+  ST_chk_(A, 'PM: edit triggers installed (onEditHandler, IM_onHardwareItemEdit_)', handlers.indexOf('onEditHandler') >= 0 && handlers.indexOf('IM_onHardwareItemEdit_') >= 0, handlers.join(', '));
+  var it = ss.getSheetByName(IM_ITEMS_SHEET), a2 = it ? String(it.getRange('A2').getDisplayValue()) : '';
+  ST_chk_(A, 'PM: IMS item list (_IMS_Items) loads, no #REF / "Allow access" error', !!it && a2 !== '' && a2.charAt(0) !== '#', a2 ? 'first item: ' + a2 : 'empty');
+
+  ST_runChecks_('PM wiring', IM_verifyWiring());
+  ST_runChecks_('Item Status formula', IM_verifyItemStatus());
+  ST_runChecks_('Hardware → Purchases', IM_verifyPurchasePush());
+  return true;
+}
+
+function ST_project_(st) {
+  var A = 'Project', ss = SpreadsheetApp.getActive(), proj = ss.getSheetByName(SHEETS.PROJECTS);
+  st.name = ST_TAG + ' ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MMdd-HHmm');
+  st.id = addProject_(st.name);
+  st.label = st.id + ' — ' + st.name;
+  st.pmRow = findRowByValue_(proj, 1, st.id);
+  var mile = ss.getSheetByName(SHEETS.MILESTONES);
+  if (mile && !findRowByValue_(mile, 1, st.label)) mile.getRange(firstEmptyRow_(mile, 1), 1).setValue(st.label);
+  ST_save_(st);
+  ST_chk_(A, 'Add project: next PRJ-### id and name written', /^PRJ-\d+$/.test(st.id) && !!st.pmRow, st.label);
+
+  var deadline = function (offset, expect) {
+    proj.getRange(st.pmRow, 5).setValue(ST_date_(-1)); proj.getRange(st.pmRow, 6).setValue(ST_date_(offset));
+    SpreadsheetApp.flush();
+    var v = proj.getRange(st.pmRow, 9, 1, 3).getValues()[0];  // I label, J delay status, K days left
+    ST_chk_(A, 'Deadline ' + (offset >= 0 ? '+' : '') + offset + ' days → Delay Status "' + expect + '"', String(v[1]) === expect, 'Delay Status = "' + v[1] + '", days left = ' + v[2]);
+    return v;
+  };
+  var v0 = deadline(-2, 'Overdue');
+  ST_chk_(A, 'Label formula builds "PRJ-### — name"', String(v0[0]) === st.label, String(v0[0]));
+  deadline(3, 'Near Deadline');
+  var v2 = deadline(30, 'On Track');
+  ST_chk_(A, 'Days left counts down from the handover date', ST_close_(v2[2], 30, 1), 'days left = ' + v2[2]);
+
+  var sync = IM_syncProjectsToMasters_();
+  ST_chk_(A, 'Project sent to Masters (sync)', sync.pushed >= 1 && sync.errors.length === 0, 'pushed ' + sync.pushed + (sync.errors.length ? '; ' + sync.errors.join('; ') : ''));
+  var m = (Masters.getProjects() || []).filter(function (p) { return String(p.Project_ID).toUpperCase() === st.id; })[0];
+  ST_chk_(A, 'Masters holds the project: same id and name, Active', !!m && m.Name === st.name && String(m['Active?']) === 'Yes', m ? 'Masters: ' + m.Project_ID + ' — ' + m.Name : 'not found in Masters');
+  ST_chk_(A, 'Masters holds the handover date', !!m && ST_dstr_(m.Target_Handover) === Utilities.formatDate(ST_date_(30), Session.getScriptTimeZone(), 'yyyy-MM-dd'), m ? String(m.Target_Handover) : '');
+  return true;
+}
+
+function ST_items_(st) {
+  var A = 'IMS items', it = SpreadsheetApp.getActive().getSheetByName(IM_ITEMS_SHEET);
+  var rates = {}, im = ST_ims_().getSheetByName('Item Master');
+  var head = im.getRange(1, 1, 1, im.getLastColumn()).getValues()[0], cRate = head.indexOf('Avg Rate (Rs.)');
+  if (cRate >= 0 && im.getLastRow() >= 2) im.getRange(2, 1, im.getLastRow() - 1, im.getLastColumn()).getValues().forEach(function (r) { if (r[0]) rates[r[0]] = Number(r[cRate]) || 0; });
+  var rows = it.getRange(2, 1, Math.max(it.getLastRow() - 1, 1), 5).getValues()
+    .filter(function (r) { return r[0] && r[1] && typeof r[4] === 'number'; })
+    .map(function (r) { return { code: String(r[0]), label: String(r[1]), uom: String(r[2]), name: String(r[3]), stock: r[4], rate: rates[r[0]] || 0 }; });
+  var isTest = function (x) { return /test/i.test(x.name + ' ' + x.label); };
+  var pick = function (list) { return list.filter(isTest)[0] || list[0]; };
+  var xs = rows.filter(function (x) { return x.stock >= 3 && x.rate > 0; }).sort(function (a, b) { return a.stock - b.stock; });
+  st.x = pick(xs);
+  var zs = rows.filter(function (x) { return !st.x || x.code !== st.x.code; });
+  st.z = pick(zs);
+  if (st.z) st.z.qty = Math.ceil(st.z.stock) + 5;
+  ST_save_(st);
+  ST_chk_(A, 'An IMS item with stock >= 3 and an Avg Rate exists for the in-stock / requisition path', !!st.x, st.x ? st.x.code + ' (' + st.x.name + '): stock ' + st.x.stock + ', Avg Rate ' + st.x.rate : 'none found: in-stock, reservation, requisition and Finance steps are skipped');
+  if (st.z) ST_log_(A, 'Out-of-stock item', 'INFO', st.z.code + ' (' + st.z.name + '): stock ' + st.z.stock + ', will ask for ' + st.z.qty);
+  else ST_log_(A, 'A second IMS item exists for the out-of-stock path', 'SKIP', 'only one item in IMS');
+  return true;
+}
+
+function ST_hardware_(st) {
+  var A = 'Hardware List', ss = SpreadsheetApp.getActive(), hw = ss.getSheetByName(SHEETS.HARDWARE);
+  var add = function (material, qty) {
+    var r = firstEmptyRow_(hw, 1), id = 'HW-' + ST_pad_(getMaxIdNumber_(hw, 'HW') + 1);
+    hw.getRange(r, 1).setValue(id); hw.getRange(r, 2).setValue(st.label); hw.getRange(r, 3).setValue(material);
+    hw.getRange(r, 5).setValue(qty); hw.getRange(r, 7).setValue('Pcs'); hw.getRange(r, IM_HW_RESERVE_COL).setValue(false);
+    return { row: r, id: id };
+  };
+  if (st.x) st.a = add(st.x.label, 2);
+  if (st.z) st.b = add(st.z.label, st.z.qty);
+  st.c = add('ZZ selftest free-text widget', 1);
+  ST_save_(st);
+  SpreadsheetApp.flush();
+  var rows = [st.a, st.b, st.c].filter(Boolean).map(function (x) { return x.row; });
+  IM_refreshStockStatus_(rows);
+  SpreadsheetApp.flush();
+  var f = function (o) { return hw.getRange(o.row, IM_STOCK_COL).getValue(); };
+  var j = function (o) { return hw.getRange(o.row, IM_HW_STATUS_COL).getValue(); };
+  if (st.a) {
+    ST_chk_(A, 'In Stock (IMS) column shows a number for an IMS item', typeof f(st.a) === 'number', 'F = ' + f(st.a));
+    if (typeof f(st.a) === 'number' && !ST_close_(f(st.a), st.x.stock, 0.001)) ST_log_(A, 'In Stock figure equals the IMS stock read earlier', 'WARN', 'F = ' + f(st.a) + ', earlier ' + st.x.stock + ' (stock moved in between?)');
+    ST_chk_(A, 'Stock Status fills itself "In Stock" (needs 2, IMS has ' + st.x.stock + ')', j(st.a) === 'In Stock', 'J = "' + j(st.a) + '"');
+  }
+  if (st.b) ST_chk_(A, 'Stock Status fills itself "Out of Stock" (needs ' + st.z.qty + ', IMS has ' + st.z.stock + ')', j(st.b) === 'Out of Stock', 'J = "' + j(st.b) + '"');
+  ST_chk_(A, 'Free-text material: In Stock shows n/a and Stock Status stays blank', f(st.c) === 'n/a' && j(st.c) === '', 'F = "' + f(st.c) + '", J = "' + j(st.c) + '"');
+  ST_chk_(A, 'Nothing reserved or ordered before the tick', rows.every(function (r) { return hw.getRange(r, IM_HW_RSV_COL).getValue() === '' && hw.getRange(r, IM_HW_PUSHED_COL).getValue() === ''; }), '');
+  return true;
+}
+
+function ST_reserve_(st) {
+  var A = 'Reserve', ss = SpreadsheetApp.getActive(), hw = ss.getSheetByName(SHEETS.HARDWARE), pur = ss.getSheetByName(SHEETS.PURCHASES);
+  var tick = function (o) { hw.getRange(o.row, IM_HW_RESERVE_COL).setValue(true); SpreadsheetApp.flush(); return IM_autoEvaluateHardwareRow_(hw, o.row); };
+  if (st.a) {
+    var ra = tick(st.a), ma = String(hw.getRange(st.a.row, IM_HW_RSV_COL).getValue());
+    ST_chk_(A, 'Tick on an in-stock row reserves the full quantity', /^In Stock, reserving 2$/.test(ra) && /^PMR-\w+ \| pending \| 2$/.test(ma), ra + ' → ' + ma);
+    ST_chk_(A, 'Ticking again does not reserve twice', /already requested/.test(tick(st.a)), '');
+    ST_chk_(A, 'In-stock row sends nothing to Purchases', hw.getRange(st.a.row, IM_HW_PUSHED_COL).getValue() === '', '');
+  }
+  if (st.b) {
+    var rb = tick(st.b), pc = String(hw.getRange(st.b.row, IM_HW_PUSHED_COL).getValue());
+    var wantRes = st.z.stock > 0 ? ', reserving ' + st.z.stock : '';
+    ST_chk_(A, 'Tick on an out-of-stock row reserves what exists and orders the shortfall (5)', rb.indexOf('Out of Stock' + wantRes) === 0 && /^PUR-\d+$/.test(pc), rb);
+    if (/^PUR-\d+$/.test(pc)) {
+      st.b.pur = pc; ST_save_(st);
+      var pr = findRowByValue_(pur, 1, pc), p = pr ? pur.getRange(pr, 1, 1, 15).getValues()[0] : null;
+      ST_chk_(A, 'Purchases row: project, material, Required = Ordered = shortfall 5, "Not Ordered"', !!p && p[1] === st.label && p[2] === st.z.label && p[4] === 5 && p[6] === 5 && p[13] === 'Not Ordered', p ? JSON.stringify(p.slice(0, 8)) + ' status ' + p[13] : 'no Purchases row ' + pc);
+    }
+  }
+  var rc = tick(st.c);
+  ST_chk_(A, 'Tick on a free-text row is refused ("not an IMS item")', /not an IMS item/.test(rc), rc);
+  hw.getRange(st.c.row, IM_HW_RESERVE_COL).setValue(false);
+  return true;
+}
+
+/** Register rows of this project, as arrays. */
+function ST_regRows_(st) {
+  var reg = ST_ims_().getSheetByName('Reservation Register');
+  if (reg.getLastRow() < 2) return [];
+  return reg.getRange(2, 1, reg.getLastRow() - 1, 16).getValues().filter(function (r) { return String(r[7]).indexOf(st.label + ' / ') === 0; });
+}
+
+function ST_waitReservations_(st) {
+  var A = 'IMS reservation', rows = ST_regRows_(st);
+  var want = (st.a ? 1 : 0) + (st.b && st.z.stock > 0 ? 1 : 0);
+  if (rows.some(function (r) { return r[8] === 'Error'; })) {
+    ST_log_(A, 'IMS turns the PM request into a reservation', 'FAIL', rows.filter(function (r) { return r[8] === 'Error'; }).map(function (r) { return r[9]; }).join('; '));
+    return true;
+  }
+  var active = rows.filter(function (r) { return r[8] === 'Active'; });
+  if (active.length < want) { st.waitNote = active.length + ' of ' + want + ' reservation(s) active so far (IMS trigger runs every minute)'; return false; }
+  ST_log_(A, 'IMS turns the PM requests into Active reservations within the trigger interval', 'PASS', active.length + ' reservation(s)');
+  var ra = st.a && active.filter(function (r) { return r[7] === st.label + ' / ' + st.a.id; });
+  if (st.a) {
+    var x = ra[0];
+    ST_chk_(A, 'One reservation only for the in-stock row (no duplicate), qty 2, right item and UOM', ra.length === 1 && x[3] === st.x.code && x[5] === 2 && String(x[6]) !== '' && String(x[4]) !== '', x ? x[1] + ' ' + x[3] + ' × ' + x[5] + ' ' + x[6] : 'missing');
+    st.rsvA = x ? x[1] : ''; ST_save_(st);
+  }
+  if (st.b && st.z.stock > 0) {
+    var rb = active.filter(function (r) { return r[7] === st.label + ' / ' + st.b.id; });
+    ST_chk_(A, 'Out-of-stock row reserved only what exists (' + st.z.stock + ')', rb.length === 1 && ST_close_(rb[0][5], st.z.stock), rb[0] ? rb[0][1] + ' × ' + rb[0][5] : 'missing');
+  }
+  IM_refreshReservationStatus(true);
+  var hw = SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE);
+  if (st.a) { var m = String(hw.getRange(st.a.row, IM_HW_RSV_COL).getValue()); ST_chk_(A, 'PM column "IMS Reservation" follows IMS: "RSV-… | reserved 2"', /^RSV-\d+ \| reserved 2$/.test(m), m); }
+  return true;
+}
+
+function ST_waitItemStatus_(st) {
+  if (st.skipDownstream) return true;
+  var A = 'Item Status', hw = SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE);
+  var got = function (o) { return String(hw.getRange(o.row, IM_HW_ITEMSTATUS_COL).getValue()); };
+  var okA = !st.a || got(st.a) === 'Reserved';
+  var okB = !st.b || /^(Reserved|Not Reserved) \+ To order$/.test(got(st.b));
+  if (!(okA && okB)) { st.waitNote = 'A = "' + (st.a ? got(st.a) : '-') + '", B = "' + (st.b ? got(st.b) : '-') + '" (the IMS import formula can lag a few minutes)'; return false; }
+  ST_log_(A, 'Item Status: "Reserved" for the in-stock row, "… + To order" for the shortfall row', 'PASS', (st.a ? got(st.a) : '') + ' / ' + (st.b ? got(st.b) : ''));
+  return true;
+}
+function ST_itemStatusTimeout_(st) {
+  var hw = SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE);
+  ST_log_('Item Status', 'Item Status formulas caught up with IMS', 'WARN', 'still "' + (st.a ? hw.getRange(st.a.row, IM_HW_ITEMSTATUS_COL).getValue() : '-') + '" / "' + (st.b ? hw.getRange(st.b.row, IM_HW_ITEMSTATUS_COL).getValue() : '-') + '" after the wait: _IMS_Items may need "Allow access", or IMPORTRANGE is slow');
+}
+
+/** Write requisition commands for IMS (its 1-minute trigger runs them with the real postRequisitionRows). */
+function ST_sendCmds_(st, qtys) {
+  var ims = ST_ims_(), sh = ims.getSheetByName(ST_CMD);
+  if (!sh) { sh = ims.insertSheet(ST_CMD); sh.getRange(1, 1, 1, 5).setValues([['Id', 'Action', 'Params', 'Status', 'Result']]); sh.hideSheet(); }
+  var start = Math.max(sh.getLastRow(), 1) + 1, rows = qtys.map(function (q, i) {
+    return ['ST-' + (start + i), 'requisition', JSON.stringify({ project: st.label, itemCode: st.x.code, qty: q }), 'Pending', ''];
+  });
+  sh.getRange(start, 1, rows.length, 5).setValues(rows);
+  st.cmdFrom = start; st.cmdTo = start + rows.length - 1; ST_save_(st);
+}
+function ST_cmdResults_(st) {
+  var sh = ST_ims_().getSheetByName(ST_CMD);
+  return sh.getRange(st.cmdFrom, 1, st.cmdTo - st.cmdFrom + 1, 5).getValues();
+}
+/** true when every command has finished; logs errors. */
+function ST_cmdsDone_(st, area) {
+  var res = ST_cmdResults_(st);
+  if (res.some(function (r) { return r[3] === 'Pending'; })) { st.waitNote = 'IMS has not run the requisition command yet (trigger runs every minute)'; return false; }
+  var bad = res.filter(function (r) { return r[3] !== 'Done'; });
+  ST_chk_(area, 'IMS posted the self-test requisition(s) through the real requisition code', bad.length === 0, bad.length ? bad.map(function (r) { return r[4]; }).join('; ') : res.map(function (r) { return r[4]; }).join(', '));
+  return true;
+}
+
+function ST_req1_(st) {
+  if (st.skipDownstream) { ST_log_('Requisition', 'Requisitions, reservation consumption and the Finance import', 'SKIP', 'IMS did not turn the PM reservation requests into reservations, so nothing after that can be tested'); st.skipReq = true; return true; }
+  if (!st.x) { ST_log_('Requisition', 'Requisition and reservation consumption', 'SKIP', 'no usable IMS item'); st.skipReq = true; return true; }
+  if (!st.sent1) { ST_sendCmds_(st, [1]); st.sent1 = true; ST_save_(st); st.waitNote = 'command sent to IMS'; return false; }
+  if (!ST_cmdsDone_(st, 'Requisition')) return false;
+  var A = 'Requisition', r = ST_regRows_(st).filter(function (x) { return x[1] === st.rsvA; })[0];
+  ST_chk_(A, 'Issuing 1 of 2 reserved: reservation becomes "Partially Consumed", Consumed Qty 1', !!r && r[8] === 'Partially Consumed' && ST_close_(r[14], 1), r ? r[8] + ', consumed ' + r[14] : 'reservation not found');
+  IM_refreshReservationStatus(true);
+  var m = String(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE).getRange(st.a.row, IM_HW_RSV_COL).getValue());
+  ST_chk_(A, 'PM column "IMS Reservation" now says "partially consumed"', /partially consumed/.test(m), m);
+  return true;
+}
+
+function ST_req2_(st) {
+  if (st.skipReq) return true;
+  if (!st.sent2) { ST_sendCmds_(st, [1, 1]); st.sent2 = true; ST_save_(st); st.waitNote = 'commands sent to IMS'; return false; }
+  if (!ST_cmdsDone_(st, 'Requisition')) return false;
+  var A = 'Requisition', ims = ST_ims_(), rq = ims.getSheetByName('Material Requisition Register');
+  var lines = rq.getLastRow() >= 2 ? rq.getRange(2, 1, rq.getLastRow() - 1, 7).getValues().filter(function (r) { return r[3] === st.label; }) : [];
+  ST_chk_(A, 'Three requisition lines exist for the project, exact label, right item, qty 1 each', lines.length === 3 && lines.every(function (r) { return r[4] === st.x.code && r[6] === 1; }), lines.length + ' line(s)');
+  var r = ST_regRows_(st).filter(function (x) { return x[1] === st.rsvA; })[0];
+  ST_chk_(A, 'After the second issue the reservation is fully "Consumed" (2 of 2); the third, un-reserved issue changed nothing else', !!r && r[8] === 'Consumed' && ST_close_(r[14], 2), r ? r[8] + ', consumed ' + r[14] : 'not found');
+  IM_refreshReservationStatus(true);
+  var m = String(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE).getRange(st.a.row, IM_HW_RSV_COL).getValue());
+  ST_chk_(A, 'PM column "IMS Reservation" now says "consumed"', /consumed/.test(m) && !/partially/.test(m), m);
+  return true;
+}
+
+function ST_finance_(st) {
+  if (st.skipReq) return true;
+  var A = 'Finance import', fin = ST_finBook_(), pc = fin.getSheetByName('Project_Costs');
+  var key = 'IMS:' + st.id + ':' + st.x.code + '#1';
+  var rows = pc.getLastRow() >= 2 ? pc.getRange(2, 1, pc.getLastRow() - 1, 19).getValues().filter(function (r) { return String(r[12]).indexOf('IMS:' + st.id + ':') === 0; }) : [];
+  var g = rows.filter(function (r) { return r[12] === key; })[0];
+  if (!g || !ST_close_(g[9], 3)) { st.waitNote = g ? 'cost row has qty ' + g[9] + ' of 3 so far' : 'no cost row yet (Finance import runs every 10 minutes)'; return false; }
+  ST_log_(A, 'Finance imported the requisitions within its trigger interval', 'PASS', '');
+  ST_chk_(A, 'Three requisitions of one item became ONE grouped cost row (qty 3)', rows.length === 1, rows.length + ' cost row(s) for the project');
+  ST_chk_(A, 'Cost row project is the PM/Masters label, type Material, Pending, no GST', g[2] === st.label && g[3] === 'Material' && g[13] === 'Pending' && g[17] === '', 'project "' + g[2] + '", ' + g[3] + ', ' + g[13]);
+  var fresh = 0, im = ST_ims_().getSheetByName('Item Master'), head = im.getRange(1, 1, 1, im.getLastColumn()).getValues()[0], c = head.indexOf('Avg Rate (Rs.)');
+  if (c >= 0) { var rr = im.getRange(2, 1, im.getLastRow() - 1, im.getLastColumn()).getValues().filter(function (x) { return x[0] === st.x.code; })[0]; fresh = rr ? Number(rr[c]) : 0; }
+  ST_chk_(A, 'Cost amount = 3 × the IMS Avg Rate (frozen at import, GST 0)', fresh > 0 && ST_close_(g[7], 3 * fresh, Math.max(0.5, 0.02 * 3 * fresh)), 'amount ' + g[7] + ', 3 × ' + fresh + ' = ' + (3 * fresh));
+  var mp = fin.getSheetByName('M_Project'), mrows = mp && mp.getLastRow() >= 2 ? mp.getRange(2, 1, mp.getLastRow() - 1, 3).getValues().filter(function (r) { return String(r[0]).toUpperCase() === st.id; }) : [];
+  ST_chk_(A, 'Project is in Finance\'s project list (code + PM name), so invoices / customers can be attached', mrows.length === 1 && mrows[0][1] === st.name, mrows.length ? mrows[0].join(' | ') : 'not in M_Project');
+  var lg = fin.getSheetByName('IMS_Cost_Log'), lrows = lg && lg.getLastRow() >= 2 ? lg.getRange(2, 1, lg.getLastRow() - 1, 11).getValues().filter(function (r) { return r[2] === st.id; }) : [];
+  ST_chk_(A, 'Import log holds the 3 lines with frozen price and group key', lrows.length === 3 && lrows.every(function (r) { return r[10] === 'Imported' && r[9] === key; }), lrows.length + ' line(s)');
+  return true;
+}
+
+function ST_cleanup_(st) {
+  var A = 'Cleanup';
+  if (!st.id || String(st.name).indexOf(ST_TAG) < 0) { ST_log_(A, 'Delete the test project', 'SKIP', 'no test project was created'); return true; }
+  var ss = SpreadsheetApp.getActive();
+  var pv = Masters.previewProjectDelete(st.id, ss.getId(), st.label);
+  if (pv.problems.length) { ST_log_(A, 'Delete preview', 'FAIL', pv.problems.join(' / ') + '. NOT deleted: remove ' + st.label + ' with Delete Project.'); st.noClean = true; return true; }
+  var total = function (list) { return list.reduce(function (n, x) { return n + (x.n || 0); }, 0); };
+  var n = { pm: total(pv.systems.pm), ims: total(pv.systems.ims), fin: total(pv.systems.fin) };
+  var summary = 'PM ' + n.pm + ', IMS ' + n.ims + ', Finance ' + n.fin + ' row(s)';
+  if (n.pm > 12 || n.ims > 12 || n.fin > 12) {
+    ST_log_(A, 'Delete preview is small enough to be only the test data', 'FAIL', summary + ': far more than a self-test creates. NOT deleted. Check ' + st.label + ' by hand.'); st.noClean = true; return true;
+  }
+  ST_log_(A, 'Delete preview', 'INFO', summary);
+  var res = Masters.executeProjectDelete(st.id, ss.getId(), st.label, st.id);
+  reseedArrayFormulas_(ss);
+  ST_chk_(A, 'Project deleted everywhere (Finance, IMS, PM, Masters)', res.complete && !res.problems.length, res.problems.join('; ') || 'request ' + res.requestId);
+  if (!res.complete) st.noClean = true;
+  return true;
+}
+
+function ST_verifyCleanup_(st) {
+  if (st.noClean || !st.id) return true;
+  var A = 'Cleanup', left = [];
+  var ss = SpreadsheetApp.getActive();
+  if (findRowByValue_(ss.getSheetByName(SHEETS.PROJECTS), 1, st.id)) left.push('PM Projects');
+  var hw = ss.getSheetByName(SHEETS.HARDWARE);
+  if (hw.getLastRow() >= 2 && hw.getRange(2, 2, hw.getLastRow() - 1, 1).getValues().some(function (r) { return r[0] === st.label; })) left.push('PM Hardware List');
+  if ((Masters.getProjects() || []).some(function (p) { return String(p.Project_ID).toUpperCase() === st.id; })) left.push('Masters Projects');
+  var ims = ST_ims_();
+  if (ST_regRows_(st).length) left.push('IMS Reservation Register');
+  var rq = ims.getSheetByName('Material Requisition Register');
+  if (rq.getLastRow() >= 2 && rq.getRange(2, 4, rq.getLastRow() - 1, 1).getValues().some(function (r) { return r[0] === st.label; })) left.push('IMS Material Requisition Register');
+  try {
+    var fin = ST_finBook_(), pc = fin.getSheetByName('Project_Costs');
+    if (pc.getLastRow() >= 2 && pc.getRange(2, 13, pc.getLastRow() - 1, 1).getValues().some(function (r) { return String(r[0]).indexOf('IMS:' + st.id + ':') === 0; })) left.push('Finance Project_Costs');
+    var mp = fin.getSheetByName('M_Project');
+    if (mp && mp.getLastRow() >= 2 && mp.getRange(2, 1, mp.getLastRow() - 1, 1).getValues().some(function (r) { return String(r[0]).toUpperCase() === st.id; })) left.push('Finance project list');
+  } catch (e) { left.push('Finance (' + e.message + ')'); }
+  ST_chk_(A, 'Nothing of the test project is left in any system', left.length === 0, left.length ? 'still present in: ' + left.join(', ') : '');
+  return true;
+}
+
+function ST_verifyStock_(st) {
+  if (st.noClean || !st.x) return true;
+  var it = SpreadsheetApp.getActive().getSheetByName(IM_ITEMS_SHEET);
+  var r = it.getRange(2, 1, Math.max(it.getLastRow() - 1, 1), 5).getValues().filter(function (x) { return x[0] === st.x.code; })[0];
+  if (!r || !ST_close_(r[4], st.x.stock, 0.001)) { st.waitNote = 'IMS stock of ' + st.x.code + ' is ' + (r ? r[4] : '?') + ', was ' + st.x.stock + ' (snapshots refresh within a minute, the import formula a few more)'; return false; }
+  ST_log_('Cleanup', 'IMS stock of ' + st.x.code + ' is back to ' + st.x.stock + ' (requisitions and reservations are gone)', 'PASS', '');
+  return true;
+}
+function ST_stockTimeout_(st) { ST_log_('Cleanup', 'IMS stock of ' + st.x.code + ' back to ' + st.x.stock, 'WARN', st.waitNote + '. Open IMS and check Stock Snapshot for that item.'); }
+
+function ST_final_(st) {
+  try { var ims = ST_ims_(), c = ims.getSheetByName(ST_CMD); if (c) ims.deleteSheet(c); } catch (e) {}
+  st.done = true;
+  return true;
+}
+
+var ST_STEPS_ = [
+  { n: 'preflight', f: ST_preflight_, min: 2 }, { n: 'project', f: ST_project_, min: 2 }, { n: 'items', f: ST_items_, min: 2 },
+  { n: 'hardware', f: ST_hardware_, min: 2 }, { n: 'reserve', f: ST_reserve_, min: 2 },
+  { n: 'reservation in IMS', f: ST_waitReservations_, min: 5, fail: function (st) { st.skipDownstream = true; st.skipReq = true; } },
+  { n: 'item status', f: ST_waitItemStatus_, min: 6, soft: ST_itemStatusTimeout_ },
+  { n: 'requisition 1', f: ST_req1_, min: 5, fail: function (st) { st.skipReq = true; } }, { n: 'requisition 2', f: ST_req2_, min: 5, fail: function (st) { st.skipReq = true; } },
+  { n: 'finance import', f: ST_finance_, min: 16 },
+  { n: 'cleanup', f: ST_cleanup_, min: 3 }, { n: 'verify cleanup', f: ST_verifyCleanup_, min: 3 },
+  { n: 'verify stock', f: ST_verifyStock_, min: 5, soft: ST_stockTimeout_ }, { n: 'finish', f: ST_final_, min: 2 }
+];
+
+/** Trigger target (every minute while a test runs). */
+function IM_selfTestTick() {
+  IM_QUIET_ = true;   // the verify routines used by preflight must not pop up dialogs
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try {
+    var st = ST_load_();
+    if (!st || st.done) { ST_stopTrigger_(); return; }
+    var t0 = Date.now();
+    while (!st.done && Date.now() - t0 < 240000) {
+      var def = ST_STEPS_[st.step], res;
+      if (!def) { st.done = true; break; }
+      try { res = def.f(st); }
+      catch (e) { ST_log_('Error', 'Step "' + def.n + '"', 'FAIL', e.message + (e.stack ? ' @ ' + String(e.stack).split('\n')[1] : '')); st.failed = (st.failed || []).concat(def.n); res = true; }
+      if (res === true) { st.step++; st.stepAt = Date.now(); st.waitNote = ''; ST_save_(st); continue; }
+      if (Date.now() - st.stepAt > def.min * 60000) {
+        if (def.soft) def.soft(st);
+        else { ST_log_('Timeout', 'Step "' + def.n + '"', 'FAIL', 'gave up after ' + def.min + ' min: ' + (st.waitNote || 'no progress')); if (def.fail) def.fail(st); }
+        st.step++; st.stepAt = Date.now(); st.waitNote = ''; ST_save_(st); continue;
+      }
+      ST_save_(st); break;
+    }
+    if (st.done) { ST_save_(st); ST_finish_(st); }
+  } finally { lock.releaseLock(); }
+}
+
+function ST_stopTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === ST_FN) ScriptApp.deleteTrigger(t); });
+}
+
+function ST_finish_(st) {
+  ST_stopTrigger_();
+  var sh = ST_reportSheet_(false), last = sh.getLastRow();
+  var vals = last >= 4 ? sh.getRange(4, 4, last - 3, 1).getValues().map(function (r) { return r[0]; }) : [];
+  var c = function (k) { return vals.filter(function (v) { return v === k; }).length; };
+  var verdict = c('FAIL') ? 'PROBLEMS FOUND' : (c('WARN') ? 'PASSED with warnings' : 'ALL GOOD');
+  var line = verdict + ' · ' + c('PASS') + ' passed, ' + c('FAIL') + ' failed, ' + c('WARN') + ' warning(s) · finished ' +
+    Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM HH:mm') + (st.noClean ? ' · TEST PROJECT NOT DELETED: ' + st.label : '');
+  sh.getRange(1, 1).setValue('Self-test: ' + line);
+  sh.getRange(1, 1).setBackground(c('FAIL') ? '#FFC7CE' : c('WARN') ? '#FFEB9C' : '#C6EFCE');
+  PropertiesService.getScriptProperties().setProperty('IM_SELFTEST_MSG', line);
+  PropertiesService.getScriptProperties().deleteProperty(ST_PROP);
+}
+
+/** Menu: start. */
+function IM_selfTestStart() {
+  var ui = SpreadsheetApp.getUi();
+  var cur = ST_load_();
+  if (cur && !cur.done) { ui.alert('Self-test', 'A self-test is already running (step ' + (cur.step + 1) + ' of ' + ST_STEPS_.length + '). Watch the "' + ST_REPORT + '" sheet, or use "Stop self-test and clean up".', ui.ButtonSet.OK); return; }
+  var ok = ui.alert('Run the system self-test?',
+    'It creates a test project "' + ST_TAG + ' …" with a few Hardware List rows, reserves and issues about 3 units of one IMS item, waits for the Finance import, then DELETES the test project everywhere.\n\n' +
+    '• Takes about 15 minutes; you can keep working, but do not edit the test rows.\n• Burns a few REQ / RSV / COST numbers.\n• Results appear in the "' + ST_REPORT + '" sheet.\n\nStart now?', ui.ButtonSet.YES_NO);
+  if (ok !== ui.Button.YES) return;
+  ST_reportSheet_(true);
+  var st = { v: 1, step: 0, stepAt: Date.now(), startedAt: Date.now(), waitNote: '' };
+  ST_save_(st);
+  ST_stopTrigger_();
+  ScriptApp.newTrigger(ST_FN).timeBased().everyMinutes(1).create();
+  SpreadsheetApp.getActive().setActiveSheet(ST_reportSheet_(false));
+  SpreadsheetApp.getActive().toast('Self-test started. It runs by itself; results appear in the report sheet.', '🧪 Self-test', 8);
+  SpreadsheetApp.getActive().toast('The first checks run within a minute.', '🧪 Self-test', 5);
+}
+
+/** Menu: abort the waiting and clean up now. */
+function IM_selfTestStop() {
+  var st = ST_load_();
+  if (!st) { SpreadsheetApp.getUi().alert('Self-test', 'No self-test is running.', SpreadsheetApp.getUi().ButtonSet.OK); return; }
+  ST_log_('Stop', 'Self-test stopped by the user', 'WARN', 'jumping to cleanup');
+  var i = 0; while (ST_STEPS_[i] && ST_STEPS_[i].n !== 'cleanup') i++;
+  st.step = i; st.stepAt = Date.now(); ST_save_(st);
+  IM_selfTestTick();
+}
+
+/** Menu: open the last report. */
+function IM_selfTestShowReport() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(ST_REPORT);
+  if (!sh) { SpreadsheetApp.getUi().alert('Self-test', 'No report yet. Run the self-test first.', SpreadsheetApp.getUi().ButtonSet.OK); return; }
+  SpreadsheetApp.getActive().setActiveSheet(sh);
+}
+
+/** On open: tell the user how the last self-test ended (once). */
+function IM_selfTestAnnounce_() {
+  var props = PropertiesService.getScriptProperties(), msg = props.getProperty('IM_SELFTEST_MSG');
+  if (!msg) return;
+  SpreadsheetApp.getActive().toast(msg + ' (see the "' + ST_REPORT + '" sheet)', '🧪 Self-test', 20);
+  props.deleteProperty('IM_SELFTEST_MSG');
 }

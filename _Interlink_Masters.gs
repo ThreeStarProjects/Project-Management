@@ -129,9 +129,14 @@ function IM_onOpen_() {
     .addItem('Refresh reservation status',     'IM_refreshReservationStatus')
     .addItem('Refresh stock status',           'IM_refreshStockStatusNow')
     .addSeparator()
+    .addItem('🧪 Run system self-test',          'IM_selfTestStart')
+    .addItem('Show last self-test report',     'IM_selfTestShowReport')
+    .addItem('Stop self-test and clean up',    'IM_selfTestStop')
+    .addSeparator()
     .addItem('About',                          'IM_about_')
     .addToUi();
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
+  try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col M current on open
   try { IM_refreshStockStatus_(null); } catch (e) {}        // keep Stock Status (col J) of unticked rows current on open
 }
