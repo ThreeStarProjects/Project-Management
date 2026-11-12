@@ -84,10 +84,14 @@ function IM_refreshStockStatus_(only) {
   }
 }
 
-/** Menu action. */
-function IM_refreshStockStatusNow() {
+/**
+ * Menu: bring the whole Hardware List up to date in one click: IMS Reservation (col M) from the IMS Register,
+ * and Stock Status (col J) of the rows that are not ticked yet. Both also run by themselves when PM opens.
+ */
+function IM_refreshHardwareNow() {
+  IM_refreshReservationStatus(true);
   var n = IM_refreshStockStatus_(null);
-  SpreadsheetApp.getActive().toast(n ? 'Stock Status updated on ' + n + ' row(s).' : 'Stock Status already up to date.', '🔗 Interlink', 5);
+  SpreadsheetApp.getActive().toast('Reservations refreshed from IMS; ' + (n ? 'Stock Status updated on ' + n + ' row(s).' : 'Stock Status already up to date.'), '🔗 Interlink', 5);
 }
 
 /** Evaluate one Hardware row. Returns a short result line ("skipped: …" when nothing was done). */
