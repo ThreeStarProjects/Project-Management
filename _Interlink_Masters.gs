@@ -139,6 +139,7 @@ function IM_onOpen_() {
     .addToUi();
   try { IM_removeDuplicateTriggers_(); } catch (e) {}       // a doubled edit trigger would run every edit twice
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
+  try { IM_syncPeopleFromMasters_(); } catch (e) {}         // new Masters employees appear in the People list (ticket dropdowns)
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_installHelpNotes_(); } catch (e) {}              // explanations on the Hardware List headers
   try { IM_healFormulaColumns_(); } catch (e) {}            // an automatic formula someone typed over comes back
@@ -161,15 +162,52 @@ function IM_about_() {
 }
 
 // -----------------------------------------------------------------------------
-// Dropdown refresher — stub for v0.4 Phase 1. Each system will fill in its
-// own IM_refreshDropdowns() in a sibling _Interlink_Dropdowns.gs file that
-// knows which sheets+columns to re-validate.
+// Employees from Masters (item 8, test run). Masters' Employees is the master list. PM's People sheet (the
+// ticket "Raised By / Assigned To" dropdowns) is kept in step ADDITIVELY: an active Masters employee that the
+// list lacks is appended; nothing already there is changed or removed. Names are compared ignoring case,
+// punctuation and extra spaces, and never fuzzily ("Arjun" is not "Arjun Singh"). Differences the other way
+// (a name in PM / IMS / Finance that Masters does not have, or an employee Masters marks as Left) are listed in
+// 📋 Needs attention for a person to decide.
 // -----------------------------------------------------------------------------
+function IM_normName_(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
+
+/** Masters employees: { active: [{name, role}], left: {norm: true}, all: {norm: true} }. Throws if Masters cannot be read. */
+function IM_mastersEmployees_() {
+  var out = { active: [], left: {}, all: {} };
+  (IM_getEmployees() || []).forEach(function (r) {
+    var n = String(r.Name || '').trim();
+    if (!n) return;
+    var k = IM_normName_(n);
+    out.all[k] = true;
+    if (String(r.Status) === 'Left') out.left[k] = true;
+    else out.active.push({ name: n, role: String(r.Role || '').trim() });
+  });
+  return out;
+}
+
+/** Append the active Masters employees PM's People list does not have yet. Returns { added, names, overflow }. */
+function IM_syncPeopleFromMasters_(fresh) {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.PEOPLE);
+  if (!sh) return { added: 0, names: [], overflow: false };
+  if (fresh) { try { IM_clearCache(); } catch (e) {} }
+  var emp = IM_mastersEmployees_(), have = {}, last = sh.getLastRow();
+  if (last >= 2) sh.getRange(2, 1, last - 1, 1).getValues().forEach(function (r) { if (String(r[0]).trim() !== '') have[IM_normName_(r[0])] = true; });
+  var add = emp.active.filter(function (e) { return !have[IM_normName_(e.name)]; });
+  if (!add.length) return { added: 0, names: [], overflow: false };
+  var start = firstEmptyRow_(sh, 1);
+  sh.getRange(start, 1, add.length, 3).setValues(add.map(function (e) { return [e.name, '', e.role]; }));   // Name | Department (blank) | Role
+  return { added: add.length, names: add.map(function (e) { return e.name; }), overflow: start + add.length - 1 > 100 };   // the dropdown range is A2:A100
+}
+
+/** Menu: 🔗 Refresh dropdowns from Masters. Projects and employees, with a plain summary. */
 function IM_refreshDropdowns() {
-  SpreadsheetApp.getUi().alert(
-    'Dropdowns not wired yet',
-    'This system doesn\'t have per-sheet dropdown rules configured yet. ' +
-    'That lives in _Interlink_Dropdowns.gs (next step).',
-    SpreadsheetApp.getUi().ButtonSet.OK
-  );
+  var ss = SpreadsheetApp.getActive(), parts = [];
+  try { var p = IM_syncProjectsToMasters_(); parts.push(p.pushed ? p.pushed + ' project(s) sent to Masters' : 'projects already in step'); }
+  catch (e) { parts.push('projects: ' + IM_friendlyText_(e.message)); }
+  try {
+    var e2 = IM_syncPeopleFromMasters_(true);
+    parts.push(e2.added ? e2.added + ' employee(s) added to the People list (' + e2.names.slice(0, 4).join(', ') + (e2.names.length > 4 ? ', …' : '') + ')' : 'People list already has every active employee');
+    if (e2.overflow) parts.push('the People list is longer than its dropdown range (A2:A100): ask your administrator');
+  } catch (e) { parts.push('employees: ' + IM_friendlyText_(e.message)); }
+  ss.toast(parts.join(' · '), '🔗 Interlink', 10);
 }

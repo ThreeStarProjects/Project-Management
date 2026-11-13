@@ -1188,6 +1188,9 @@ function IM_needsAttentionNow(quiet) {
     });
   } catch (e) {}
 
+  // 5. employee names that disagree with Masters (item 8 test run)
+  try { IM_employeeAttention_(add); } catch (e) {}
+
   // write the sheet
   var order = { '🔴': 0, '🟡': 1, '🔵': 2 };
   lines.sort(function (a, b) { return order[a[0]] - order[b[0]]; });
@@ -1204,6 +1207,47 @@ function IM_needsAttentionNow(quiet) {
   if (quiet) { if (red) ss.toast('🔴 ' + red + ' problem(s) need attention. See the "' + NA_SHEET + '" sheet (🔗 Interlink → 📋 Needs attention).', '🔗 Interlink', 10); }
   else { ss.setActiveSheet(sh); }
   return res;
+}
+
+/**
+ * Employee lists that disagree with Masters, for a person to decide. Never changes anything.
+ *   not in Masters → 🟡 add them in Masters if they are real employees, or delete them from that list
+ *   marked Left in Masters but still listed → 🔵 delete them from that list
+ * Compared by IM_normName_ (case / punctuation / spaces only).
+ */
+function IM_employeeAttention_(add) {
+  var emp = IM_mastersEmployees_();
+  var shortList = function (a) { return a.slice(0, 8).join(', ') + (a.length > 8 ? ', … (+' + (a.length - 8) + ' more)' : ''); };
+  var check = function (area, where, names) {
+    var missing = [], left = [], seen = {};
+    names.forEach(function (n) {
+      n = String(n).trim(); var k = IM_normName_(n);
+      if (!k || seen[k]) return; seen[k] = true;
+      if (!emp.all[k]) missing.push(n); else if (emp.left[k]) left.push(n);
+    });
+    if (missing.length) add('🟡', area, missing.length + ' name(s) in the ' + where + ' are not in Masters: ' + shortList(missing), where,
+      'If they are real employees, add them in Masters (⚙ Masters → Open Admin UI). Otherwise delete them from this list.');
+    if (left.length) add('🔵', area, left.length + ' employee(s) that Masters marks as Left are still in the ' + where + ': ' + shortList(left), where,
+      'Delete them from this list so they stop appearing in dropdowns.');
+  };
+  var col = function (sh, c, head) {
+    if (!sh || sh.getLastRow() < 2) return [];
+    return sh.getRange(2, c, sh.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; }).filter(function (v) { return String(v).trim() !== ''; });
+  };
+  check('Employees', 'PM People list', col(SpreadsheetApp.getActive().getSheetByName(SHEETS.PEOPLE), 1));
+  try { check('Employees', 'IMS employee list', col(SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName('Dropdowns'), 9)); } catch (e) {}
+  try {
+    var fid = Masters.getSystemSheetIds().finance;
+    if (fid) {
+      var m = SpreadsheetApp.openById(fid).getSheetByName('M_Employee');
+      if (m && m.getLastRow() >= 2) {
+        var head = m.getRange(1, 1, 1, m.getLastColumn()).getValues()[0], cA = head.indexOf('Active');
+        var names = m.getRange(2, 1, m.getLastRow() - 1, m.getLastColumn()).getValues()
+          .filter(function (r) { return String(r[0]).trim() !== '' && (cA < 0 || String(r[cA]) !== 'No'); }).map(function (r) { return r[0]; });
+        check('Employees', 'Finance employee list (M_Employee)', names);
+      }
+    }
+  } catch (e) {}
 }
 
 // ---------------------------------------------------------------- help on the sheet
