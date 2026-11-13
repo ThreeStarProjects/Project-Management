@@ -921,9 +921,9 @@ function IM_selfTestAnnounce_() {
 // =============================================================================
 var IM_CMD_SHEET = '_PM_Commands';
 
-/** The three lists IMS validates against (Dropdowns A = category, C = material type, E = UOM). */
-function IM_addItemLists() {
-  var dd = SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName('Dropdowns');
+/** The three lists IMS validates against (Dropdowns A = category, C = material type, E = UOM), read from an open IMS book. */
+function IM_addItemListsFrom_(ims) {
+  var dd = ims.getSheetByName('Dropdowns');
   if (!dd) throw new Error('IMS has no Dropdowns sheet');
   var col = function (c) {
     if (dd.getLastRow() < 2) return [];
@@ -931,10 +931,11 @@ function IM_addItemLists() {
   };
   return { categories: col(1), materialTypes: col(3), uoms: col(5) };
 }
+function IM_addItemLists() { return IM_addItemListsFrom_(SpreadsheetApp.openById(IM_IMS_SHEET_ID)); }
 
 /** Validate and queue the item. d = { itemName, size, grade, uom, category, materialType, avgRate, forceCreate }. Returns { row }. */
 function IM_addItemSubmit(d) {
-  var lists = IM_addItemLists();
+  var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), lists = IM_addItemListsFrom_(ims);   // IMS is opened once
   var name = String(d.itemName || '').trim();
   if (!name) throw new Error('Item name is required.');
   if (name.length > 120) throw new Error('Item name is too long (max 120 characters).');
@@ -945,7 +946,7 @@ function IM_addItemSubmit(d) {
   if (isNaN(rate) || rate < 0) throw new Error('Avg rate must be a number, 0 or more.');
   var params = { itemName: name, size: String(d.size || '').trim(), grade: String(d.grade || '').trim(), uom: d.uom,
                  category: d.category, materialType: d.materialType, avgRate: rate, forceCreate: d.forceCreate === true };
-  var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), sh = ims.getSheetByName(IM_CMD_SHEET);
+  var sh = ims.getSheetByName(IM_CMD_SHEET);
   if (!sh) {
     sh = ims.insertSheet(IM_CMD_SHEET);
     sh.getRange(1, 1, 1, 7).setValues([['Id', 'Action', 'Params', 'Status', 'Result', 'By', 'At']]);
@@ -957,13 +958,22 @@ function IM_addItemSubmit(d) {
   return { row: row };
 }
 
-/** What happened to a queued item: { status: Pending | Done | Error, result: {success, message, code, duplicate, existingCode, existingDesc} }. */
+/**
+ * What happened to a queued item: { status: Pending | Done | Error, result: {success, message, code, duplicate, existingCode, existingDesc} }.
+ * A read that Google answers with a timeout / "server error" is NOT a failure of the item: it is reported as Pending
+ * so the dialog simply asks again. Anything else is a real error and is raised.
+ */
 function IM_addItemPoll(row) {
-  var sh = SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName(IM_CMD_SHEET);
-  if (!sh) throw new Error('IMS command sheet not found');
-  var r = sh.getRange(Number(row), 1, 1, 5).getValues()[0], result = null;
-  if (r[3] !== 'Pending' && r[4]) { try { result = JSON.parse(r[4]); } catch (e) { result = { success: false, message: String(r[4]) }; } }
-  return { status: String(r[3]), result: result };
+  try {
+    var sh = SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName(IM_CMD_SHEET);
+    if (!sh) throw new Error('IMS command sheet not found');
+    var r = sh.getRange(Number(row), 1, 1, 5).getValues()[0], result = null;
+    if (r[3] !== 'Pending' && r[4]) { try { result = JSON.parse(r[4]); } catch (e) { result = { success: false, message: String(r[4]) }; } }
+    return { status: String(r[3]), result: result };
+  } catch (e) {
+    if (/DEADLINE|timed out|server error|try again|temporar|Service/i.test(String(e && e.message))) return { status: 'Pending', result: null, slow: true };
+    throw e;
+  }
 }
 
 function IM_addItemDialog() {
@@ -985,20 +995,24 @@ function IM_addItemDialog() {
     '<p><button onclick="google.script.host.close()" style="padding:7px 18px">Close</button></p></div>' +
     '<p id="err" style="color:#b00020"></p></div>' +
     '<script>' +
+    'var fails=0;' +
     'function el(i){return document.getElementById(i);}' +
     'function fail(e){el("err").textContent=(e&&e.message)?e.message:String(e);el("go").disabled=false;}' +
+    'function transient(e){return /DEADLINE|server error|timed out|try again|temporar|storage|Service/i.test((e&&e.message)?e.message:String(e));}' +
     'function fill(id,list){var s=el(id);s.innerHTML="";var o=document.createElement("option");o.value="";o.textContent="-- select --";s.appendChild(o);' +
     'list.forEach(function(x){var q=document.createElement("option");q.value=x;q.textContent=x;s.appendChild(q);});}' +
     'google.script.run.withSuccessHandler(function(l){fill("uom",l.uoms);fill("cat",l.categories);fill("mtype",l.materialTypes);}).withFailureHandler(fail).IM_addItemLists();' +
-    'function send(force){el("err").textContent="";var d={itemName:el("name").value,size:el("size").value,grade:el("grade").value,uom:el("uom").value,category:el("cat").value,materialType:el("mtype").value,avgRate:el("rate").value,forceCreate:force};' +
+    'function send(force){el("err").textContent="";fails=0;var d={itemName:el("name").value,size:el("size").value,grade:el("grade").value,uom:el("uom").value,category:el("cat").value,materialType:el("mtype").value,avgRate:el("rate").value,forceCreate:force};' +
     'if(!d.itemName.trim()||!d.uom||!d.category||!d.materialType){fail("Fill the item name, unit, category and material type.");return;}' +
     'el("go").disabled=true;google.script.run.withSuccessHandler(function(r){wait(r.row,0);}).withFailureHandler(fail).IM_addItemSubmit(d);}' +
     'function wait(row,n){el("form").style.display="none";el("done").style.display="none";el("wait").style.display="block";' +
-    'el("waittxt").textContent="Sent to IMS, waiting for it to be created ("+(n*4)+"s). IMS picks it up within a minute.";' +
-    'if(n>40){finish("IMS has not processed it yet. Check that IMS is running its 1-minute trigger (IMS: Interlink > Process PM reservation requests now), then try again.",false);return;}' +
-    'setTimeout(function(){google.script.run.withSuccessHandler(function(p){if(p.status==="Pending"){wait(row,n+1);return;}' +
+    'el("waittxt").textContent="Sent to IMS, waiting for it to be created ("+(n*6)+"s). IMS picks it up within a minute."+(fails?" Google is a little slow, still trying.":"");' +
+    'if(n>25){finish("IMS has not answered yet. Your request was sent: look in IMS Item Master before sending it again. If it is not there, check that IMS is running its 1-minute job (IMS: Interlink > Process PM reservation requests now).",false);return;}' +
+    'setTimeout(function(){google.script.run.withSuccessHandler(function(p){if(p.status==="Pending"){wait(row,n+1);return;}fails=0;' +
     'var r=p.result||{};if(r.success){finish("Added "+r.code+"\\n"+r.message+"\\n\\nIt appears in the Material dropdown within a few minutes.",false);}' +
-    'else if(r.duplicate){finish(r.message+"\\n\\nIf this really is a different item, create it anyway.",true);}else{finish("Not added: "+(r.message||"unknown error"),false);}}).withFailureHandler(fail).IM_addItemPoll(row);},4000);}' +
+    'else if(r.duplicate){finish(r.message+"\\n\\nIf this really is a different item, create it anyway.",true);}else{finish("Not added: "+(r.message||"unknown error"),false);}})' +
+    '.withFailureHandler(function(e){if(transient(e)&&fails<10){fails++;wait(row,n+1);return;}' +
+    'finish("Your request was sent to IMS, but this window could not read the answer ("+((e&&e.message)?e.message:e)+"). Look in IMS Item Master before sending it again: the item may already be there.",false);}).IM_addItemPoll(row);},6000);}' +
     'function finish(t,dup){el("wait").style.display="none";el("done").style.display="block";el("donetxt").textContent=t;el("dupbtn").style.display=dup?"block":"none";}' +
     '</script>'
   ).setWidth(470).setHeight(560);
