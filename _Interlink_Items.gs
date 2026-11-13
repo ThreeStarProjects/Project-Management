@@ -297,7 +297,8 @@ function IM_onReserveTicked_(e, sh, row) {
   var res = IM_autoEvaluateHardwareRow_(sh, row);
   var failed = res.indexOf('skipped') === 0 || res.indexOf('error') === 0;
   if (failed && !/already (requested|sent)/.test(res)) sh.getRange(row, IM_HW_RESERVE_COL).setValue(false);
-  e.source.toast(res.replace(/^skipped: /, ''), 'Hardware List', 8);
+  var msg = failed ? IM_friendlyText_(res) : res + (/reserving/.test(res) ? '. IMS confirms within about a minute.' : '');
+  e.source.toast(msg, 'Hardware List', 10);
 }
 
 /** Fill Unit from the picked IMS item's UOM, if the Unit cell is blank. */
@@ -509,15 +510,6 @@ function ST_date_(offsetDays) { var d = new Date(); d.setHours(0, 0, 0, 0); d.se
 function ST_dstr_(v) { return v instanceof Date ? Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd') : String(v).slice(0, 10); }
 function ST_close_(a, b, tol) { return Math.abs(Number(a) - Number(b)) <= (tol === undefined ? 0.001 : tol); }
 
-/** Heartbeat text → minutes since it was written ("… dd/MM HH:mm[:ss] …"), or -1 when unreadable. */
-function ST_heartbeatAge_(text, tz) {
-  var m = /(\d\d)\/(\d\d) (\d\d):(\d\d)(?::(\d\d))?/.exec(String(text));
-  if (!m) return -1;
-  var yr = Utilities.formatDate(new Date(), tz, 'yyyy');
-  var when = Utilities.parseDate(yr + '-' + m[2] + '-' + m[1] + ' ' + m[3] + ':' + m[4] + ':' + (m[5] || '00'), tz, 'yyyy-MM-dd HH:mm:ss');
-  return (Date.now() - when.getTime()) / 60000;
-}
-
 function ST_runChecks_(area, lines) {
   (lines || []).forEach(function (l) {
     var s = String(l), pass = /^PASS/.test(s);
@@ -528,38 +520,7 @@ function ST_runChecks_(area, lines) {
 // ---------------------------------------------------------------- steps (true = finished, false = keep waiting)
 
 function ST_preflight_(st) {
-  var A = 'Setup', ss = SpreadsheetApp.getActive();
-  try { ST_log_(A, 'Masters library reachable', 'PASS', 'version ' + Masters.getVersion() + ', ' + (Masters.getProjects() || []).length + ' project(s)'); }
-  catch (e) { ST_log_(A, 'Masters library reachable', 'FAIL', e.message); }
-
-  var ims = null;
-  try {
-    ims = ST_ims_();
-    var reg = ims.getSheetByName('Reservation Register');
-    ST_chk_(A, 'IMS: Reservation Register has the Request ID column (PM requests can be queued)', !!reg && reg.getRange(1, 16).getValue() === 'Request ID', '');
-    ST_chk_(A, 'IMS: Material Requisition Register and Item Master exist', !!ims.getSheetByName('Material Requisition Register') && !!ims.getSheetByName('Item Master'), '');
-    var hb = reg ? String(reg.getRange('Q1').getValue()) : '', age = ST_heartbeatAge_(hb, 'Asia/Kolkata'), tr = /triggers: (\d+)/.exec(hb);
-    ST_chk_(A, 'IMS: 1-minute reservation trigger is running (heartbeat < 5 min old)', age >= 0 && age < 5 && !!tr && Number(tr[1]) >= 1, hb || 'no heartbeat text');
-  } catch (e) { ST_log_(A, 'IMS reachable', 'FAIL', e.message); }
-
-  try {
-    var ids = Masters.getSystemSheetIds();
-    ST_chk_(A, 'Finance and IMS have registered their spreadsheet ids with Masters', !!ids.finance && !!ids.ims, 'finance: ' + (ids.finance ? 'yes' : 'NO (open Finance once)'));
-    if (ids.finance) {
-      var fin = SpreadsheetApp.openById(ids.finance), log = fin.getSheetByName('IMS_Cost_Log');
-      var fhb = log ? String(log.getRange('M1').getValue()) : '', fage = ST_heartbeatAge_(fhb, 'Asia/Kolkata'), ftr = /triggers: (\d+)/.exec(fhb);
-      ST_chk_(A, 'Finance: 10-minute IMS cost import is running (last run < 25 min ago)', fage >= 0 && fage < 25 && !!ftr && Number(ftr[1]) >= 1, fhb || 'no IMS_Cost_Log heartbeat: run IM_installImportTrigger() in Finance');
-    }
-  } catch (e) { ST_log_(A, 'Finance reachable', 'FAIL', e.message); }
-
-  var dupes = IM_removeDuplicateTriggers_();
-  if (dupes) ST_log_(A, 'No duplicate PM triggers', 'WARN', dupes + ' duplicate trigger(s) were installed (every edit ran twice); the extra copy was removed');
-  else ST_log_(A, 'No duplicate PM triggers (each edit runs once)', 'PASS', '');
-  var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
-  ST_chk_(A, 'PM: edit triggers installed (onEditHandler, IM_onHardwareItemEdit_)', handlers.indexOf('onEditHandler') >= 0 && handlers.indexOf('IM_onHardwareItemEdit_') >= 0, handlers.join(', '));
-  var it = ss.getSheetByName(IM_ITEMS_SHEET), a2 = it ? String(it.getRange('A2').getDisplayValue()) : '';
-  ST_chk_(A, 'PM: IMS item list (_IMS_Items) loads, no #REF / "Allow access" error', !!it && a2 !== '' && a2.charAt(0) !== '#', a2 ? 'first item: ' + a2 : 'empty');
-
+  IM_healthChecks_().forEach(function (r) { ST_log_(r.area, r.check, r.result, r.detail + (r.fix ? '  → ' + r.fix : '')); });
   ST_runChecks_('PM wiring', IM_verifyWiring());
   ST_runChecks_('Item Status formula', IM_verifyItemStatus());
   ST_runChecks_('Hardware → Purchases', IM_verifyPurchasePush());
@@ -1042,4 +1003,264 @@ function IM_addItemDialog() {
     '</script>'
   ).setWidth(470).setHeight(560);
   SpreadsheetApp.getUi().showModalDialog(html, '➕ Add item to IMS');
+}
+
+// =============================================================================
+// FRIENDLY HELP · HEALTH CHECK · NEEDS ATTENTION  (for people who are not technical)
+//   IM_friendlyError_        plain-language version of an error, with what to do next
+//   IM_healthChecks_         the fast checks (connections, background jobs) shared by the 🩺 Health check button,
+//                            📋 Needs attention and the long self-test
+//   IM_needsAttentionNow     the "Needs attention" sheet: what is stuck or waiting for a person, and what to do
+//   IM_installHelpNotes_     explanations on the Hardware List column headers (hover the header)
+//   IM_healFormulaColumns_   puts back the automatic formulas (In Stock, Item Status) if someone typed over them
+//   IM_showStartHere         the "Start here" tab
+// =============================================================================
+
+/** Plain-language form of an error / skip message: { text, hint }. Unknown messages come back unchanged with no hint. */
+function IM_friendlyError_(msg) {
+  var m = String(msg == null ? '' : msg).replace(/^(skipped|error):\s*/i, '').replace(/^Exception:\s*/i, '').trim(), x;
+  var rules = [
+    [/needs Project, Material and Required Qty/i, function () { return ['Fill in the Project, Material and Required Qty first.', 'Then tick Reserve? again.']; }],
+    [/not an IMS item/i, function () { return ['This material is not in IMS, so it cannot be reserved.', 'Add it with 🔗 Interlink → ➕ Add item to IMS and pick it from the dropdown in a few minutes, or set Stock Status to Out of Stock to order it.']; }],
+    [/already sent to Purchases \(([^)]*)\)/i, function (r) { return ['This row was already sent to Purchases (' + r[1] + ').', 'Nothing more to do here.']; }],
+    [/reservation already requested \(([^)]*)\)/i, function (r) { return ['IMS already has the reservation request for this row (' + r[1] + ').', 'Nothing more to do; IMS confirms within about a minute.']; }],
+    [/sheet busy|Busy|lock/i, function () { return ['Another update was running at the same moment.', 'Wait a few seconds and tick again.']; }],
+    [/Code not found: (\S+)/i, function (r) { return ['IMS does not know the item "' + r[1] + '".', 'Pick the Material again from the dropdown, or add it with 🔗 Interlink → ➕ Add item to IMS.']; }],
+    [/Qty must be > ?0/i, function () { return ['The quantity must be more than 0.', 'Enter the Required Qty and tick Reserve? again.']; }],
+    [/not in allowed list/i, function () { return ['That value is not in IMS\'s list.', 'Choose it from the dropdown.']; }],
+    [/Editors only|Admin only|not an editor/i, function () { return ['This account is not allowed to do that.', 'Ask the Masters admin to add your email as an editor.']; }],
+    [/no access|Cannot open|You do not have permission|Access denied|Requested entity was not found/i, function () { return ['This account cannot open the other spreadsheet.', 'Ask the owner to share IMS / Finance with you as an editor.']; }],
+    [/too many times|quota|Rate Limit/i, function () { return ['Google is slowing the sheet down for a moment.', 'Wait a minute and try again.']; }],
+    [/IMS Reservation Register is not set up/i, function () { return ['IMS is not ready for PM requests yet.', 'Ask your administrator to run the IMS set-up once.']; }]
+  ];
+  for (var i = 0; i < rules.length; i++) {
+    if ((x = rules[i][0].exec(m))) { var o = rules[i][1](x); return { text: o[0], hint: o[1] }; }
+  }
+  return { text: m, hint: '' };
+}
+/** One sentence: what happened and what to do. */
+function IM_friendlyText_(msg) { var f = IM_friendlyError_(msg); return f.text + (f.hint ? ' ' + f.hint : ''); }
+
+// ---------------------------------------------------------------- health checks
+/** Minutes since the "dd/MM HH:mm[:ss]" in a heartbeat text (IST), or -1 when unreadable. */
+function IM_heartbeatAge_(text) {
+  var m = /(\d\d)\/(\d\d) (\d\d):(\d\d)(?::(\d\d))?/.exec(String(text));
+  if (!m) return -1;
+  var yr = Utilities.formatDate(new Date(), 'Asia/Kolkata', 'yyyy');
+  var when = Utilities.parseDate(yr + '-' + m[2] + '-' + m[1] + ' ' + m[3] + ':' + m[4] + ':' + (m[5] || '00'), 'Asia/Kolkata', 'yyyy-MM-dd HH:mm:ss');
+  return (Date.now() - when.getTime()) / 60000;
+}
+
+/**
+ * The fast checks. Returns [{ area, check, result: PASS|FAIL|WARN, detail, fix }]. `fix` is a plain sentence for a
+ * person. A duplicated PM trigger is repaired on the spot (reported as WARN). Never throws.
+ */
+function IM_healthChecks_() {
+  var out = [], A = 'Setup', ss = SpreadsheetApp.getActive();
+  var add = function (check, ok, detail, fix, level) { out.push({ area: A, check: check, result: ok ? 'PASS' : (level || 'FAIL'), detail: detail || '', fix: ok ? '' : (fix || '') }); return ok; };
+  try { add('Masters library reachable', true, 'version ' + Masters.getVersion() + ', ' + (Masters.getProjects() || []).length + ' project(s)'); }
+  catch (e) { add('Masters library reachable', false, e.message, 'Masters cannot be reached. ' + IM_friendlyText_(e.message)); }
+
+  try {
+    var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), reg = ims.getSheetByName('Reservation Register');
+    add('IMS: Reservation Register has the Request ID column (PM requests can be queued)', !!reg && reg.getRange(1, 16).getValue() === 'Request ID', '',
+        'IMS is not set up for PM requests. Ask your administrator to run the IMS set-up (IM_installReservationRegister).');
+    add('IMS: Material Requisition Register and Item Master exist', !!ims.getSheetByName('Material Requisition Register') && !!ims.getSheetByName('Item Master'), '', 'An IMS sheet is missing or renamed. Tell your administrator.');
+    var hb = reg ? String(reg.getRange('Q1').getValue()) : '', age = IM_heartbeatAge_(hb), tr = /triggers: (\d+)/.exec(hb);
+    add('IMS: 1-minute reservation trigger is running (heartbeat < 5 min old)', age >= 0 && age < 5 && !!tr && Number(tr[1]) >= 1, hb || 'no heartbeat text',
+        'IMS has stopped answering PM reservation requests. Open the IMS spreadsheet once (that restarts it), or in IMS use 🔗 Interlink → Process PM reservation requests now.');
+  } catch (e) { add('IMS reachable', false, e.message, 'PM cannot open IMS. ' + IM_friendlyText_(e.message)); }
+
+  try {
+    var ids = Masters.getSystemSheetIds();
+    add('Finance and IMS have registered their spreadsheet ids with Masters', !!ids.finance && !!ids.ims, 'finance: ' + (ids.finance ? 'yes' : 'NO'), 'Open the Finance spreadsheet once so it registers itself.');
+    if (ids.finance) {
+      var log = SpreadsheetApp.openById(ids.finance).getSheetByName('IMS_Cost_Log');
+      var fhb = log ? String(log.getRange('M1').getValue()) : '', fage = IM_heartbeatAge_(fhb), ftr = /triggers: (\d+)/.exec(fhb);
+      add('Finance: 10-minute IMS cost import is running (last run < 25 min ago)', fage >= 0 && fage < 25 && !!ftr && Number(ftr[1]) >= 1, fhb || 'no IMS_Cost_Log heartbeat',
+          'The Finance import of IMS costs has stopped. Open the Finance spreadsheet once (that restarts it). If this stays red, ask your administrator to run IM_installImportTrigger in Finance.');
+    }
+  } catch (e) { add('Finance reachable', false, e.message, 'PM cannot open Finance. ' + IM_friendlyText_(e.message)); }
+
+  var dupes = 0;
+  try { dupes = IM_removeDuplicateTriggers_(); } catch (e) {}
+  if (dupes) out.push({ area: A, check: 'No duplicate PM triggers', result: 'WARN', detail: dupes + ' duplicate trigger(s) were installed (every edit ran twice); the extra copy was removed', fix: '' });
+  else add('No duplicate PM triggers (each edit runs once)', true, '');
+  var handlers = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+  add('PM: edit triggers installed (onEditHandler, IM_onHardwareItemEdit_)', handlers.indexOf('onEditHandler') >= 0 && handlers.indexOf('IM_onHardwareItemEdit_') >= 0, handlers.join(', '),
+      'PM\'s automatic edit handling is not installed. Ask your administrator to run IM_installItems and installTriggers.');
+  var it = ss.getSheetByName(IM_ITEMS_SHEET), a2 = it ? String(it.getRange('A2').getDisplayValue()) : '';
+  add('PM: IMS item list (_IMS_Items) loads, no #REF / "Allow access" error', !!it && a2 !== '' && a2.charAt(0) !== '#', a2 ? 'first item: ' + a2 : 'empty',
+      'The IMS item list is not loading. Open View ▸ Hidden sheets ▸ _IMS_Items, click cell A2 and press "Allow access".');
+  return out;
+}
+
+/** Menu: 🩺 Health check. One verdict, each problem with what to do. */
+function IM_healthCheckNow() {
+  var ui = SpreadsheetApp.getUi(), res = IM_healthChecks_();
+  var bad = res.filter(function (r) { return r.result === 'FAIL'; }), warn = res.filter(function (r) { return r.result === 'WARN'; });
+  var head = bad.length ? '🔴 ' + bad.length + ' problem(s) found' : '🟢 Everything is working';
+  var lines = bad.map(function (r) { return '• ' + r.check.replace(/\s*\(.*$/, '') + '\n   → ' + (r.fix || r.detail); });
+  warn.forEach(function (r) { lines.push('• ' + r.check + ': ' + r.detail); });
+  ui.alert('🩺 Health check', head + '\n\n' + (lines.length ? lines.join('\n\n') + '\n\n' : '') + (res.length - bad.length) + ' of ' + res.length + ' checks are fine.', ui.ButtonSet.OK);
+}
+
+// ---------------------------------------------------------------- needs attention
+var NA_SHEET = 'Needs attention';
+
+/** Rebuild the "Needs attention" sheet. quiet = on open: no pop-up, only a toast when something is red. Returns { red, amber, blue }. */
+function IM_needsAttentionNow(quiet) {
+  var ss = SpreadsheetApp.getActive(), lines = [];
+  var add = function (p, area, what, where, todo) { lines.push([p, area, what, where, todo]); };
+  var capped = function (arr, n, makeLine, moreLine) { arr.slice(0, n).forEach(makeLine); if (arr.length > n) moreLine(arr.length - n); };
+
+  // 1. background jobs / connections (the health checks)
+  IM_healthChecks_().forEach(function (r) {
+    if (r.result === 'FAIL') add('🔴', 'System', r.check.replace(/\s*\(.*$/, ''), '', r.fix || r.detail);
+    else if (r.result === 'WARN') add('🔵', 'System', r.check, '', r.detail);
+  });
+
+  // 2. Hardware List
+  var hw = ss.getSheetByName(SHEETS.HARDWARE), errs = [], oos = [], free = [], ready = [];
+  if (hw && hw.getLastRow() >= 2) {
+    hw.getRange(2, 1, hw.getLastRow() - 1, IM_HW_RSV_COL).getValues().forEach(function (r, i) {
+      var id = r[0], row = i + 2;
+      if (!id || !r[1] || !r[2]) return;
+      var ticked = r[IM_HW_RESERVE_COL - 1] === true, pushed = r[IM_HW_PUSHED_COL - 1], m = String(r[IM_HW_RSV_COL - 1] || ''), st = r[IM_HW_STATUS_COL - 1], f = r[IM_STOCK_COL - 1];
+      if (m.charAt(0) === '⚠') errs.push({ id: id, row: row, why: m.replace(/^⚠\s*/, '') });
+      else if (!ticked && !pushed && !m) {
+        if (f === 'n/a') free.push({ id: id, row: row, name: r[2] });
+        else if (st === 'Out of Stock') oos.push({ id: id, row: row, name: r[2] });
+        else if (st === 'In Stock') ready.push({ id: id, row: row, name: r[2] });
+      }
+    });
+  }
+  capped(errs, 30, function (e) { add('🔴', 'Hardware List', e.id + ': IMS could not reserve this row. ' + IM_friendlyError_(e.why).text, 'Hardware List, row ' + e.row, IM_friendlyError_(e.why).hint || 'Fix it, untick and tick Reserve? again.'); },
+    function (n) { add('🔴', 'Hardware List', '+ ' + n + ' more rows with a ⚠', 'Hardware List', 'Filter the IMS Reservation column for ⚠.'); });
+  capped(free, 30, function (e) { add('🟡', 'Hardware List', e.id + ': "' + e.name + '" is not an IMS item', 'Hardware List, row ' + e.row, 'Add it with 🔗 Interlink → ➕ Add item to IMS and pick it again, or set Stock Status to Out of Stock to order it.'); },
+    function (n) { add('🟡', 'Hardware List', '+ ' + n + ' more free-text items', 'Hardware List', ''); });
+  capped(oos, 30, function (e) { add('🟡', 'Hardware List', e.id + ': "' + e.name + '" is out of stock and not ordered yet', 'Hardware List, row ' + e.row, 'Tick Reserve? to reserve what exists and send the shortfall to Purchases.'); },
+    function (n) { add('🟡', 'Hardware List', '+ ' + n + ' more out-of-stock rows', 'Hardware List', ''); });
+  capped(ready, 30, function (e) { add('🔵', 'Hardware List', e.id + ': "' + e.name + '" is in stock and not reserved yet', 'Hardware List, row ' + e.row, 'Tick Reserve? if this project should hold it.'); },
+    function (n) { add('🔵', 'Hardware List', '+ ' + n + ' more rows ready to reserve', 'Hardware List', ''); });
+
+  // 3. IMS: PM requests waiting too long, requisitions Finance cannot cost
+  try {
+    var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), reg = ims.getSheetByName('Reservation Register');
+    if (reg && reg.getLastRow() >= 2) {
+      var stuck = reg.getRange(2, 1, reg.getLastRow() - 1, 16).getValues().filter(function (r) { return r[8] === 'Requested' && r[11] instanceof Date && (Date.now() - r[11].getTime()) > 10 * 60000; });
+      if (stuck.length) add('🔴', 'IMS', stuck.length + ' reservation request(s) from PM have waited more than 10 minutes', 'IMS Reservation Register (Status "Requested")', 'Open the IMS spreadsheet once, or use IMS → 🔗 Interlink → Process PM reservation requests now.');
+    }
+    var rq = ims.getSheetByName('Material Requisition Register'), im = ims.getSheetByName('Item Master');
+    if (rq && im && rq.getLastRow() >= 2 && im.getLastRow() >= 2) {
+      var head = im.getRange(1, 1, 1, im.getLastColumn()).getValues()[0], cRate = head.indexOf('Avg Rate (Rs.)'), cName = head.indexOf('Item Name'), rate = {}, name = {};
+      im.getRange(2, 1, im.getLastRow() - 1, im.getLastColumn()).getValues().forEach(function (r) { if (r[0]) { rate[r[0]] = Number(r[cRate]) || 0; name[r[0]] = r[cName] || r[2] || r[0]; } });
+      var miss = {};
+      rq.getRange(2, 1, rq.getLastRow() - 1, 7).getValues().forEach(function (r) {
+        if (/^\s*PRJ-\d+/i.test(String(r[3])) && r[4] && Number(r[6]) > 0 && !(rate[r[4]] > 0)) miss[r[4]] = (miss[r[4]] || 0) + 1;
+      });
+      Object.keys(miss).slice(0, 30).forEach(function (code) {
+        add('🟡', 'IMS → Finance', 'Finance cannot cost ' + miss[code] + ' requisition line(s) of ' + code + ' (' + (name[code] || '') + '): it has no Avg Rate', 'IMS Item Master', 'Enter the Avg Rate for ' + code + ' in IMS Item Master. Finance picks the lines up by itself afterwards.');
+      });
+    }
+  } catch (e) { add('🔴', 'IMS', 'PM could not read IMS', '', IM_friendlyText_(e.message)); }
+
+  // 4. PM projects that Masters does not know (IMS and Finance cannot see them)
+  try {
+    var mine = ss.getSheetByName(SHEETS.PROJECTS), known = {};
+    (Masters.getProjects() || []).forEach(function (p) { known[String(p.Project_ID).toUpperCase()] = true; });
+    if (mine && mine.getLastRow() >= 2) mine.getRange(2, 1, mine.getLastRow() - 1, 2).getValues().forEach(function (r) {
+      if (r[0] && r[1] && !known[String(r[0]).toUpperCase()]) add('🟡', 'Projects', r[0] + ' — ' + r[1] + ' is not in Masters yet', 'Projects sheet', 'It syncs by itself when PM opens. If it stays, ask your administrator (editor rights in Masters).');
+    });
+  } catch (e) {}
+
+  // write the sheet
+  var order = { '🔴': 0, '🟡': 1, '🔵': 2 };
+  lines.sort(function (a, b) { return order[a[0]] - order[b[0]]; });
+  var red = lines.filter(function (l) { return l[0] === '🔴'; }).length, amber = lines.filter(function (l) { return l[0] === '🟡'; }).length, blue = lines.filter(function (l) { return l[0] === '🔵'; }).length;
+  var sh = ss.getSheetByName(NA_SHEET) || ss.insertSheet(NA_SHEET);
+  sh.clear();
+  var stamp = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM HH:mm');
+  sh.getRange(1, 1).setValue((lines.length ? 'Needs attention: 🔴 ' + red + ' broken · 🟡 ' + amber + ' waiting for you · 🔵 ' + blue + ' for information' : '✅ Nothing needs attention') + '   (updated ' + stamp + ')').setFontWeight('bold').setFontSize(13);
+  sh.getRange(3, 1, 1, 5).setValues([['', 'Area', 'What is wrong', 'Where', 'What to do']]).setFontWeight('bold').setBackground('#1F3864').setFontColor('#FFFFFF');
+  if (lines.length) sh.getRange(4, 1, lines.length, 5).setValues(lines).setWrap(true).setVerticalAlignment('top');
+  sh.setColumnWidth(1, 36); sh.setColumnWidth(2, 120); sh.setColumnWidth(3, 460); sh.setColumnWidth(4, 190); sh.setColumnWidth(5, 520);
+  sh.setFrozenRows(3);
+  var res = { red: red, amber: amber, blue: blue };
+  if (quiet) { if (red) ss.toast('🔴 ' + red + ' problem(s) need attention. See the "' + NA_SHEET + '" sheet (🔗 Interlink → 📋 Needs attention).', '🔗 Interlink', 10); }
+  else { ss.setActiveSheet(sh); }
+  return res;
+}
+
+// ---------------------------------------------------------------- help on the sheet
+/** Explanations on the Hardware List headers. Only written when the header is the one we expect; only when changed. */
+function IM_installHelpNotes_() {
+  var hw = SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE);
+  if (!hw) return 0;
+  var notes = [
+    [IM_STOCK_COL, IM_STOCK_HDR, 'Free stock in IMS: what is in stock minus what is already reserved. "n/a" means this material is not an IMS item. Automatic: do not type here.'],
+    [IM_HW_RESERVE_COL, IM_RESERVE_HDR, 'Tick to reserve this row in IMS. What exists is reserved; anything missing goes to Purchases. IMS confirms within about a minute. Ticking again does nothing.'],
+    [IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR, 'Where this item is now: Not Reserved, Reserving…, Reserved, Partially Consumed, Consumed, Released, plus To order / Ordered / Delivered from Purchases. Automatic. A ⚠ means IMS refused: the reason is in this cell\'s note.'],
+    [IM_HW_STATUS_COL, IM_STOCKSTATUS_HDR, 'In Stock or Out of Stock. Fills itself from IMS until you tick Reserve?. You can still choose by hand; setting Out of Stock sends the row to Purchases.'],
+    [IM_HW_PUSHED_COL, 'Pushed to Purchases', 'The Purchases row created for this item (PUR-…). Filled by itself.'],
+    [IM_HW_RSV_COL, 'IMS Reservation', 'IMS\'s answer for this row: RSV-… | reserved 5. Filled by itself.']
+  ], n = 0;
+  notes.forEach(function (x) {
+    var c = hw.getRange(1, x[0]);
+    if (String(c.getValue()) !== x[1]) return;     // not the column we think it is: leave it alone
+    if (c.getNote() !== x[2]) { c.setNote(x[2]); n++; }
+  });
+  return n;
+}
+
+/** If someone typed over an automatic formula, put it back (Hardware In Stock + Item Status, Purchases In Stock). Returns cells restored. */
+function IM_healFormulaColumns_() {
+  var ss = SpreadsheetApp.getActive(), fixed = 0;
+  var heal = function (sh, col, hdr, make) {
+    if (!sh || String(sh.getRange(1, col).getValue()) !== hdr) return;
+    var last = Math.min(sh.getMaxRows(), MAX_ROWS);
+    var f = sh.getRange(2, col, last - 1, 1).getFormulas(), out = [], changed = false;
+    f.forEach(function (r, i) { if (!r[0] || String(r[0]).charAt(0) !== '=') { out.push([make(i + 2)]); changed = true; fixed++; } else out.push([r[0]]); });
+    if (changed) sh.getRange(2, col, last - 1, 1).setFormulas(out);
+  };
+  heal(ss.getSheetByName(SHEETS.HARDWARE), IM_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
+  heal(ss.getSheetByName(SHEETS.HARDWARE), IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR, IM_itemStatusFormula_);
+  heal(ss.getSheetByName(SHEETS.PURCHASES), IM_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
+  return fixed;
+}
+
+/** Menu: ❓ Start here. Creates the tab the first time, then just opens it. */
+function IM_showStartHere() {
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName('Start here');
+  if (!sh) {
+    sh = ss.insertSheet('Start here', 0);
+    var rows = [
+      ['Start here: Project Management', 'title'],
+      ['The normal flow, step by step', 'h'],
+      ['1.  ➕ Add Project (menu 🏗 Interior PM). It reaches Masters, IMS and Finance by itself within minutes. Fill in the Start and Handover dates; the Delay Status shows On Track, Near Deadline or Overdue on its own.', ''],
+      ['2.  Hardware List: one row for each item the project needs. Pick the Project and the Material from the dropdowns and enter the Required Qty. Stock Status fills itself (In Stock or Out of Stock, from IMS).', ''],
+      ['3.  Tick Reserve? when the project should hold the item. IMS reserves what exists; anything missing goes to Purchases. IMS confirms within about a minute: Item Status shows Reserving…, then Reserved.', ''],
+      ['4.  Material not in IMS? Add it with 🔗 Interlink → ➕ Add item to IMS, then pick it from the Material dropdown after a few minutes. Or type it as plain text and set Stock Status to Out of Stock to order it.', ''],
+      ['5.  When the store issues material, the IMS Material Requisition must use this project (pick it from the dropdown). The reservation reduces by itself, and Finance shows the cost within about 10 minutes.', ''],
+      ['6.  🗑 Delete Project (menu 🏗 Interior PM) removes the project from PM, IMS, Finance and Masters after you type its ID. It cannot be undone.', ''],
+      ['What the columns and words mean', 'h'],
+      ['Reserve?  tick to make IMS hold the item for this project.', ''],
+      ['Stock Status  In Stock or Out of Stock. Fills itself until you tick Reserve?.', ''],
+      ['Item Status  where the item is now: Not Reserved, Reserving…, Reserved, Partially Consumed, Consumed, Released, and To order / Ordered / Delivered from Purchases.', ''],
+      ['Free stock  what is in stock minus what is already reserved by projects.', ''],
+      ['Requisition  the store issuing material to a project (done in IMS). Reservation  IMS holding stock for a project before it is issued.', ''],
+      ['If something looks wrong', 'h'],
+      ['•  🔗 Interlink → 📋 Needs attention lists what is stuck and what to do.', ''],
+      ['•  🔗 Interlink → 🩺 Health check shows green or red for the connections and background jobs.', ''],
+      ['•  🔗 Interlink → Refresh Hardware List brings reservations and stock status up to date now.', ''],
+      ['•  Hover a column header on the Hardware List for a short explanation. Hover a ⚠ Item Status cell to see why.', '']
+    ];
+    sh.getRange(1, 1, rows.length, 1).setValues(rows.map(function (r) { return [r[0]]; })).setWrap(true).setVerticalAlignment('top');
+    sh.setColumnWidth(1, 900);
+    rows.forEach(function (r, i) {
+      if (r[1] === 'title') sh.getRange(i + 1, 1).setFontSize(16).setFontWeight('bold');
+      if (r[1] === 'h') sh.getRange(i + 1, 1).setFontWeight('bold').setBackground('#DDEBF7');
+    });
+  }
+  ss.setActiveSheet(sh);
 }

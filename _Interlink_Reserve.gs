@@ -114,7 +114,12 @@ function IM_refreshReservationStatus(quiet) {  // quiet = from onOpen: no toast 
       var w = state[m[1]] && word(state[m[1]]);
       if (w) next = m[1] + ' | ' + w + ' ' + m[3];
     }
-    if (next && next !== s) { hw.getRange(i + 2, IM_HW_RSV_COL).setValue(next); changed++; }
+    if (next && next !== s) {
+      hw.getRange(i + 2, IM_HW_RSV_COL).setValue(next); changed++;
+      var cell = hw.getRange(i + 2, IM_HW_ITEMSTATUS_COL);   // hover the Item Status cell to see why, in plain words
+      if (next.charAt(0) === '⚠') cell.setNote('IMS refused this reservation. ' + IM_friendlyText_(next.replace(/^⚠\s*/, '')));
+      else if (s.charAt(0) === '⚠') cell.clearNote();
+    }
   });
   if (changed || !quiet) ss.toast(changed ? 'Updated ' + changed + ' reservation(s).' : 'No new results yet.', '🔗 Interlink', 5);
 }

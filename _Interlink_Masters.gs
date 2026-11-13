@@ -126,16 +126,23 @@ function IM_onOpen_() {
     .addItem('Refresh dropdowns from Masters', 'IM_refreshDropdowns')
     .addItem('Refresh Hardware List',          'IM_refreshHardwareNow')
     .addSeparator()
+    .addItem('📋 Needs attention',             'IM_needsAttentionNow')
+    .addItem('🩺 Health check',                'IM_healthCheckNow')
+    .addSeparator()
     .addSubMenu(ui.createMenu('🧪 Self-test')
       .addItem('Run system self-test',         'IM_selfTestStart')
       .addItem('Show last self-test report',   'IM_selfTestShowReport')
       .addItem('Stop self-test and clean up',  'IM_selfTestStop'))
     .addSeparator()
+    .addItem('❓ Start here',                  'IM_showStartHere')
     .addItem('About',                          'IM_about_')
     .addToUi();
   try { IM_removeDuplicateTriggers_(); } catch (e) {}       // a doubled edit trigger would run every edit twice
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
+  try { IM_installHelpNotes_(); } catch (e) {}              // explanations on the Hardware List headers
+  try { IM_healFormulaColumns_(); } catch (e) {}            // an automatic formula someone typed over comes back
+  try { IM_needsAttentionNow(true); } catch (e) {}          // refresh the "Needs attention" list; a toast only if something is red
   try { IM_refreshReservationStatus(true); } catch (e) {}  // keep Hardware List col M current on open
   try { IM_refreshStockStatus_(null); } catch (e) {}        // keep Stock Status (col J) of unticked rows current on open
 }
