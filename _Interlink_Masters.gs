@@ -140,7 +140,11 @@ function IM_onOpen_() {
     .addToUi();
   try { IM_removeDuplicateTriggers_(); } catch (e) {}       // a doubled edit trigger would run every edit twice
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
-  try { IM_syncPeopleFromMasters_(); } catch (e) {}         // new Masters employees appear in the People list (ticket dropdowns)
+  try {                                                      // the People list (ticket dropdowns) is rewritten from Masters
+    var pr = IM_syncPeopleFromMasters_();
+    if (pr.blocked) SpreadsheetApp.getActive().toast('The People list was not refreshed: details typed in PM could not be copied into Masters first (' + pr.error + '). Open PM as a Masters editor once.', '🔗 Interlink', 12);
+    else if (pr.removed.length) SpreadsheetApp.getActive().toast(pr.removed.length + ' name(s) that are not active employees in Masters were removed from the People list: ' + pr.removed.slice(0, 5).join(', ') + (pr.removed.length > 5 ? ', …' : ''), '🔗 Interlink', 12);
+  } catch (e) {}
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_installHelpNotes_(); } catch (e) {}              // explanations on the Hardware List headers
   try { IM_healFormulaColumns_(); } catch (e) {}            // an automatic formula someone typed over comes back
@@ -172,41 +176,68 @@ function IM_about_() {
 // -----------------------------------------------------------------------------
 function IM_normName_(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 
-/** Masters employees: { active: [{name, role}], left: {norm: true}, all: {norm: true} }. Throws if Masters cannot be read. */
-function IM_mastersEmployees_() {
-  var out = { active: [], left: {}, all: {} };
-  (IM_getEmployees() || []).forEach(function (r) {
-    var n = String(r.Name || '').trim();
-    if (!n) return;
-    var k = IM_normName_(n);
-    out.all[k] = true;
-    if (String(r.Status) === 'Left') out.left[k] = true;
-    else out.active.push({ name: n, role: String(r.Role || '').trim(), dept: String(r.Department || '').trim() });
-  });
-  return out;
-}
-
-/** Append the active Masters employees PM's People list does not have yet. Returns { added, names, overflow }. */
+/**
+ * The People sheet is GENERATED from Masters' Employees: it is rewritten completely each time (name, department, role, phone, email
+ * of every ACTIVE Masters employee, A to Z). It exists only because the in-sheet dropdowns (Raised By / Assigned To) need a range to
+ * read; it is not a list to edit, and names that are not active in Masters disappear from it (tickets already raised keep their text).
+ *
+ * One-time safety: if the sheet still holds a department / role / phone / email for someone that Masters has blank, that detail is
+ * first copied INTO Masters (blank fields only; needs a Masters editor). If that cannot be done, the sheet is left exactly as it is
+ * and { blocked: true } says so. Returns { rows, added:[names], removed:[names], moved, blocked, error, overflow }.
+ */
 function IM_syncPeopleFromMasters_(fresh) {
   var sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.PEOPLE);
-  if (!sh) return { added: 0, names: [], overflow: false };
+  var res = { rows: 0, added: [], removed: [], moved: 0, blocked: false, overflow: false };
+  if (!sh) return res;
   if (fresh) { try { IM_clearCache(); } catch (e) {} }
-  var emp = IM_mastersEmployees_(), have = {}, last = sh.getLastRow();
-  var byKey = {}; emp.active.forEach(function (e) { byKey[IM_normName_(e.name)] = e; });
-  if (last >= 2) sh.getRange(2, 1, last - 1, 3).getValues().forEach(function (r, i) {
-    var k = IM_normName_(r[0]);
-    if (k === '') return;
-    have[k] = true;
-    // a person already listed keeps everything typed here; only BLANK Department / Role cells are filled from Masters
-    var e = byKey[k]; if (!e) return;
-    if (String(r[1]).trim() === '' && e.dept) sh.getRange(i + 2, 2).setValue(e.dept);
-    if (String(r[2]).trim() === '' && e.role) sh.getRange(i + 2, 3).setValue(e.role);
+  var all = IM_getEmployees() || [];
+  if (!all.length) return res;          // Masters returned nothing: never wipe the list
+  var last = sh.getLastRow();
+  var cur = last >= 2 ? sh.getRange(2, 1, last - 1, 5).getValues() : [];
+  var txt = function (v) { return String(v == null ? '' : v).trim(); };
+  var byKey = {}; all.forEach(function (e) { var k = IM_normName_(e.Name); if (k && !byKey[k]) byKey[k] = e; });
+  // 1. details typed here that Masters lacks go up first
+  var up = [];
+  cur.forEach(function (r) {
+    var e = byKey[IM_normName_(r[0])]; if (!e) return;
+    var u = { Name: e.Name };
+    if (txt(e.Department) === '' && txt(r[1]) !== '') u.Department = txt(r[1]);
+    if (txt(e.Role) === '' && txt(r[2]) !== '') u.Role = txt(r[2]);
+    if (txt(e.Phone) === '' && txt(r[3]) !== '') u.Phone = txt(r[3]);
+    if (txt(e.Email) === '' && txt(r[4]) !== '') u.Email = txt(r[4]);
+    if (Object.keys(u).length > 1) up.push(u);
   });
-  var add = emp.active.filter(function (e) { return !have[IM_normName_(e.name)]; });
-  if (!add.length) return { added: 0, names: [], overflow: false };
-  var start = firstEmptyRow_(sh, 1);
-  sh.getRange(start, 1, add.length, 3).setValues(add.map(function (e) { return [e.name, e.dept || '', e.role]; }));   // Name | Department | Role
-  return { added: add.length, names: add.map(function (e) { return e.name; }), overflow: start + add.length - 1 > 100 };   // the dropdown range is A2:A100
+  if (up.length) {
+    try {
+      res.moved = Masters.fillEmployeeBlanks(up).filled;
+      CacheService.getScriptCache().remove(IM_CACHE_KEY + 'employees');
+      all = IM_getEmployees() || all;
+    } catch (e) {
+      res.blocked = true; res.error = IM_friendlyText_ ? IM_friendlyText_(e.message) : e.message; res.pending = up.length;
+      return res;                      // leave the sheet exactly as it is
+    }
+  }
+  // 2. rewrite from Masters
+  var seen = {}, rows = [];
+  all.forEach(function (e) {
+    var n = txt(e.Name).replace(/\s+/g, ' '), k = IM_normName_(n);
+    if (!k || seen[k] || String(e.Status) === 'Left') return; seen[k] = true;
+    rows.push([n, txt(e.Department), txt(e.Role), txt(e.Phone), txt(e.Email)]);
+  });
+  rows.sort(function (a, b) { return a[0].toLowerCase() < b[0].toLowerCase() ? -1 : a[0].toLowerCase() > b[0].toLowerCase() ? 1 : 0; });
+  var had = {}; cur.forEach(function (r) { var k = IM_normName_(r[0]); if (k) had[k] = txt(r[0]); });
+  var now = {}; rows.forEach(function (r) { now[IM_normName_(r[0])] = true; });
+  rows.forEach(function (r) { if (!had[IM_normName_(r[0])]) res.added.push(r[0]); });
+  Object.keys(had).forEach(function (k) { if (!now[k]) res.removed.push(had[k]); });
+  var same = cur.length >= rows.length && rows.every(function (r, i) { return r.every(function (v, j) { return txt(cur[i][j]) === v; }); }) &&
+    cur.slice(rows.length).every(function (r) { return r.every(function (v) { return txt(v) === ''; }); });
+  if (!same) {
+    if (last >= 2) sh.getRange(2, 1, Math.max(last - 1, 1), 5).clearContent();
+    if (rows.length) sh.getRange(2, 1, rows.length, 5).setValues(rows);
+  }
+  try { sh.getRange('A1').setNote('Generated from Masters (Employees). Do not type here: this sheet is rewritten automatically. Add or change people in Masters (🔗 Interlink → ➕ Add employee).'); } catch (e) {}
+  res.rows = rows.length; res.overflow = rows.length + 1 > 100;   // the dropdown range is A2:A100
+  return res;
 }
 
 /** Menu: 🔗 Refresh dropdowns from Masters. Projects and employees, with a plain summary. */
@@ -216,8 +247,11 @@ function IM_refreshDropdowns() {
   catch (e) { parts.push('projects: ' + IM_friendlyText_(e.message)); }
   try {
     var e2 = IM_syncPeopleFromMasters_(true);
-    parts.push(e2.added ? e2.added + ' employee(s) added to the People list (' + e2.names.slice(0, 4).join(', ') + (e2.names.length > 4 ? ', …' : '') + ')' : 'People list already has every active employee');
-    if (e2.overflow) parts.push('the People list is longer than its dropdown range (A2:A100): ask your administrator');
+    if (e2.blocked) parts.push('People list NOT refreshed: details typed in PM could not be copied into Masters (' + e2.error + ')');
+    else {
+      parts.push(e2.added.length || e2.removed.length ? 'People list refreshed from Masters (' + e2.rows + ' people' + (e2.added.length ? ', ' + e2.added.length + ' added' : '') + (e2.removed.length ? ', ' + e2.removed.length + ' not in Masters removed: ' + e2.removed.slice(0, 4).join(', ') + (e2.removed.length > 4 ? ', …' : '') : '') + ')' : 'People list already matches Masters (' + e2.rows + ' people)');
+      if (e2.overflow) parts.push('more than 99 people: the dropdown range (A2:A100) is too short, ask your administrator');
+    }
   } catch (e) { parts.push('employees: ' + IM_friendlyText_(e.message)); }
   ss.toast(parts.join(' · '), '🔗 Interlink', 10);
 }
@@ -244,6 +278,9 @@ function IM_addEmployee(d) {
 }
 /** PM: the name goes into the People list straight away (ticket Raised By / Assigned To). */
 function IM_addEmployeePost_(r, d) {
-  try { IM_syncPeopleFromMasters_(true); return r.name + ' now appears in the People list (ticket Raised By / Assigned To). Payroll: the accountant adds the salary in Finance.'; }
-  catch (e) { return 'Saved in Masters. The People list updates the next time PM is opened.'; }
+  try {
+    var x = IM_syncPeopleFromMasters_(true);
+    if (x.blocked) return 'Saved in Masters. The People list is refreshed the next time PM is opened.';
+    return r.name + ' now appears in the People list (ticket Raised By / Assigned To). Payroll: the accountant adds the salary in Finance.';
+  } catch (e) { return 'Saved in Masters. The People list updates the next time PM is opened.'; }
 }

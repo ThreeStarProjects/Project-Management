@@ -27,11 +27,14 @@ function api_getProjectLabels() {
 }
 
 function api_getEmployees() {
-  // The workers' ticket form never opens the sheet, so bring in newly approved Masters employees here (a few seconds at most:
-  // the Masters list is cached for 5 minutes). Never blocks the form: any failure just means the list is as it was.
+  // The workers' ticket form reads Masters' Employees directly (active people, A to Z). If Masters cannot be read right now, the
+  // generated People sheet (the last copy of the same list) is used, so the form never breaks.
   try {
-    const lk = LockService.getScriptLock();
-    if (lk.tryLock(5000)) { try { IM_syncPeopleFromMasters_(); } finally { lk.releaseLock(); } }
+    const list = (IM_getEmployees() || [])
+      .filter(e => String(e.Status) !== 'Left' && String(e.Name || '').trim())
+      .map(e => ({ name: String(e.Name).replace(/\s+/g, ' ').trim(), department: String(e.Department || '').trim(), role: String(e.Role || '').trim() }))
+      .sort((a, b) => a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : 0);
+    if (list.length) return list;
   } catch (e) {}
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const p = ss.getSheetByName(SHEETS.PEOPLE);
