@@ -146,6 +146,7 @@ function IM_onOpen_() {
     else if (pr.removed.length) SpreadsheetApp.getActive().toast(pr.removed.length + ' name(s) that are not active employees in Masters were removed from the People list: ' + pr.removed.slice(0, 5).join(', ') + (pr.removed.length > 5 ? ', …' : ''), '🔗 Interlink', 12);
   } catch (e) {}
   try { IM_syncCustomerList_(); } catch (e) {}              // the Client dropdown on the Projects sheet (Finance's customers, via Masters)
+  try { IM_syncVendorList_(); } catch (e) {}                // the Vendors sheet behind the vendor dropdowns (Masters' suppliers)
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_installHelpNotes_(); } catch (e) {}              // explanations on the Hardware List headers
   try { IM_healFormulaColumns_(); } catch (e) {}            // an automatic formula someone typed over comes back
@@ -272,6 +273,62 @@ function IM_syncCustomerList_(fresh) {
   return res;
 }
 
+/**
+ * VENDORS: Masters (Parties flagged Supplier) is the master list. The 'Vendors' sheet (the dropdowns on Purchases and Tickets read it) is a
+ * GENERATED COPY: active Masters suppliers A to Z (name, contact, category, phone, email). A vendor that only PM knows (typed here by hand,
+ * not in Masters) is KEPT below them, never deleted; it is named in the toast so someone can add it to Masters.
+ * Returns { masters:[rows], onlyPm:[rows] } (rows = [name, contact, category, phone, email]) or null when Masters returned no supplier.
+ */
+function IM_vendorRows_() {
+  var t = function (v) { return String(v == null ? '' : v).trim(); }, seen = {}, all = {}, masters = [];
+  (IM_getParties({ isSupplier: true }) || []).forEach(function (p) {
+    var n = t(p.Name).replace(/\s+/g, ' '), k = IM_normName_(n);
+    if (!k) return;
+    all[k] = true;
+    if (seen[k] || String(p['Active?'] || 'Yes').toLowerCase() === 'no') return; seen[k] = true;
+    masters.push([n, t(p.Contact_Person), t(p.Category), t(p.Phone), t(p.Email)]);
+  });
+  if (!masters.length) return null;
+  masters.sort(function (a, b) { return a[0].toLowerCase() < b[0].toLowerCase() ? -1 : a[0].toLowerCase() > b[0].toLowerCase() ? 1 : 0; });
+  var onlyPm = [], sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.VENDORS), last = sh ? sh.getLastRow() : 0;
+  if (last >= 2) sh.getRange(2, 1, last - 1, 5).getValues().forEach(function (r) {
+    var k = IM_normName_(r[0]); if (k && !all[k]) { all[k] = true; onlyPm.push(r.map(t)); }   // not in Masters at all (active or not)
+  });
+  return { masters: masters, onlyPm: onlyPm };
+}
+
+/** Rewrites the Vendors sheet from Masters and points the vendor dropdowns (Purchases col I, Tickets col N) at it. Returns { rows, added, removed, onlyPm:[names] } or null. */
+function IM_syncVendorList_(fresh) {
+  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(SHEETS.VENDORS);
+  if (!sh) return null;
+  if (fresh) { try { CacheService.getScriptCache().remove(IM_CACHE_KEY + 'parties_{"isSupplier":true}'); } catch (e) {} }
+  var v = IM_vendorRows_();
+  if (!v) return null;                                  // Masters returned nobody: never wipe the list
+  var rows = v.masters.concat(v.onlyPm), last = sh.getLastRow();
+  var cur = last >= 2 ? sh.getRange(2, 1, last - 1, 5).getValues().map(function (r) { return r.map(function (x) { return String(x).trim(); }); }) : [];
+  var same = cur.length >= rows.length && rows.every(function (r, i) { return r.every(function (x, j) { return cur[i][j] === x; }); }) &&
+    cur.slice(rows.length).every(function (r) { return r.every(function (x) { return x === ''; }); });
+  var curNames = {}; cur.forEach(function (r) { if (r[0]) curNames[IM_normName_(r[0])] = true; });
+  var now = {}; rows.forEach(function (r) { now[IM_normName_(r[0])] = true; });
+  var res = { rows: rows.length, added: rows.filter(function (r) { return !curNames[IM_normName_(r[0])]; }).length,
+              removed: Object.keys(curNames).filter(function (k) { return !now[k]; }).length, onlyPm: v.onlyPm.map(function (r) { return r[0]; }) };
+  if (!same) {
+    if (sh.getMaxRows() < rows.length + 1) sh.insertRowsAfter(sh.getMaxRows(), rows.length + 1 - sh.getMaxRows());
+    if (last >= 2) sh.getRange(2, 1, last - 1, 5).clearContent();
+    sh.getRange(2, 1, rows.length, 5).setValues(rows);
+    try { sh.getRange('A1').setNote('Generated from Masters (suppliers). Do not type here: this sheet is rewritten automatically. A vendor not in Masters is kept at the bottom; add it in Masters to make it official.'); } catch (e) {}
+  }
+  if (!same || fresh) {                                 // point the dropdowns at A2:A1000 (the old range stopped at row 100)
+    var rng = sh.getRange(2, 1, 999, 1);
+    var rule = SpreadsheetApp.newDataValidation().requireValueInRange(rng, true).setAllowInvalid(true).build();
+    [[SHEETS.PURCHASES, 9], [SHEETS.TICKETS, 14]].forEach(function (x) {
+      var s2 = ss.getSheetByName(x[0]); if (s2) s2.getRange(2, x[1], Math.max(MAX_ROWS - 1, 1), 1).setDataValidation(rule);
+    });
+    try { ss.getNamedRanges().forEach(function (nr) { if (nr.getName() === 'VENDOR_NAMES') nr.remove(); }); ss.setNamedRange('VENDOR_NAMES', rng); } catch (e) {}
+  }
+  return res;
+}
+
 /** Menu: 🔗 Refresh dropdowns from Masters. Projects and employees, with a plain summary. */
 function IM_refreshDropdowns() {
   var ss = SpreadsheetApp.getActive(), parts = [];
@@ -289,6 +346,11 @@ function IM_refreshDropdowns() {
     var cl = IM_syncCustomerList_(true);
     if (cl) parts.push('Client list: ' + cl.rows + ' customers' + (cl.added || cl.removed ? ' (' + cl.added + ' added, ' + cl.removed + ' removed)' : ''));
   } catch (e) { parts.push('customers: ' + IM_friendlyText_(e.message)); }
+  try {
+    var vl = IM_syncVendorList_(true);
+    if (vl) parts.push('Vendor list: ' + vl.rows + ' vendors' + (vl.added || vl.removed ? ' (' + vl.added + ' added, ' + vl.removed + ' removed)' : '') +
+      (vl.onlyPm.length ? ' · ' + vl.onlyPm.length + ' only in PM, not in Masters: ' + vl.onlyPm.slice(0, 4).join(', ') + (vl.onlyPm.length > 4 ? ', …' : '') : ''));
+  } catch (e) { parts.push('vendors: ' + IM_friendlyText_(e.message)); }
   ss.toast(parts.join(' · '), '🔗 Interlink', 10);
 }
 

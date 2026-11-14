@@ -80,7 +80,7 @@ function setNamedRanges_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const names = [
     ['PROJECT_LABELS', SHEETS.PROJECTS, 'I2:I' + MAX_ROWS],  // Projects.Label is col I now
-    ['VENDOR_NAMES',   SHEETS.VENDORS,  'A2:A100'],
+    ['VENDOR_NAMES',   SHEETS.VENDORS,  'A2:A1000'],
     ['PEOPLE_NAMES',   SHEETS.PEOPLE,   'A2:A100']
   ];
   ss.getNamedRanges().forEach(nr => { try { nr.remove(); } catch (e) {} });

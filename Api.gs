@@ -47,6 +47,11 @@ function api_getEmployees() {
 }
 
 function api_getVendors() {
+  // Masters' suppliers (plus any vendor only PM knows); if Masters cannot be read, the generated Vendors sheet (the last copy of the same list).
+  try {
+    const v = IM_vendorRows_();
+    if (v) return v.masters.concat(v.onlyPm).map(r => ({ name: r[0], contact: r[1], category: r[2], phone: r[3], email: r[4] }));
+  } catch (e) {}
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const v = ss.getSheetByName(SHEETS.VENDORS);
   if (!v) return [];
