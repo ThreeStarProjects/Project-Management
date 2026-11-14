@@ -145,6 +145,7 @@ function IM_onOpen_() {
     if (pr.blocked) SpreadsheetApp.getActive().toast('The People list was not refreshed: details typed in PM could not be copied into Masters first (' + pr.error + '). Open PM as a Masters editor once.', '🔗 Interlink', 12);
     else if (pr.removed.length) SpreadsheetApp.getActive().toast(pr.removed.length + ' name(s) that are not active employees in Masters were removed from the People list: ' + pr.removed.slice(0, 5).join(', ') + (pr.removed.length > 5 ? ', …' : ''), '🔗 Interlink', 12);
   } catch (e) {}
+  try { IM_syncCustomerList_(); } catch (e) {}              // the Client dropdown on the Projects sheet (Finance's customers, via Masters)
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_installHelpNotes_(); } catch (e) {}              // explanations on the Hardware List headers
   try { IM_healFormulaColumns_(); } catch (e) {}            // an automatic formula someone typed over comes back
@@ -240,6 +241,37 @@ function IM_syncPeopleFromMasters_(fresh) {
   return res;
 }
 
+/**
+ * CUSTOMERS: Finance is the master (Masters keeps a copy). The Projects sheet's Client column gets a dropdown fed by a hidden, GENERATED
+ * sheet 'Customers' (active Masters customers, A to Z). Typing a client that is not in the list is still allowed (it only shows a warning);
+ * the list is rewritten completely each time, never wiped when Masters returns nobody. Returns { rows, added, removed } or null.
+ */
+function IM_syncCustomerList_(fresh) {
+  var ss = SpreadsheetApp.getActive(), proj = ss.getSheetByName(SHEETS.PROJECTS);
+  if (!proj) return null;
+  if (fresh) { try { CacheService.getScriptCache().remove(IM_CACHE_KEY + 'customers'); } catch (e) {} }
+  var names = [], seen = {};
+  (IM_getCustomers() || []).forEach(function (c) {
+    var n = String(c.Name == null ? '' : c.Name).replace(/\s+/g, ' ').trim(), k = IM_normName_(n);
+    if (!k || seen[k] || String(c['Active?'] || 'Yes').toLowerCase() === 'no') return; seen[k] = true; names.push(n);
+  });
+  if (!names.length) return null;
+  names.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : a.toLowerCase() > b.toLowerCase() ? 1 : 0; });
+  var sh = ss.getSheetByName('Customers'), made = false;
+  if (!sh) { sh = ss.insertSheet('Customers'); made = true; sh.hideSheet(); }
+  var last = sh.getLastRow(), cur = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues().map(function (r) { return String(r[0]).trim(); }).filter(String) : [];
+  var res = { rows: names.length, added: names.filter(function (n) { return cur.indexOf(n) < 0; }).length, removed: cur.filter(function (n) { return names.indexOf(n) < 0; }).length };
+  if (made || res.added || res.removed) {
+    if (last >= 2) sh.getRange(2, 1, last - 1, 1).clearContent();
+    sh.getRange(1, 1).setValue('Customer Name').setFontWeight('bold');
+    sh.getRange(2, 1, names.length, 1).setValues(names.map(function (n) { return [n]; }));
+    try { sh.getRange('A1').setNote('Generated from Masters (Customers, copied from Finance). Do not type here: rewritten automatically.'); } catch (e) {}
+  }
+  var rule = SpreadsheetApp.newDataValidation().requireValueInRange(sh.getRange(2, 1, Math.max(names.length, 1), 1), true).setAllowInvalid(true).build();
+  proj.getRange(2, 3, Math.max(MAX_ROWS - 1, 1), 1).setDataValidation(rule);   // Projects: Client (col C)
+  return res;
+}
+
 /** Menu: 🔗 Refresh dropdowns from Masters. Projects and employees, with a plain summary. */
 function IM_refreshDropdowns() {
   var ss = SpreadsheetApp.getActive(), parts = [];
@@ -253,6 +285,10 @@ function IM_refreshDropdowns() {
       if (e2.overflow) parts.push('more than 99 people: the dropdown range (A2:A100) is too short, ask your administrator');
     }
   } catch (e) { parts.push('employees: ' + IM_friendlyText_(e.message)); }
+  try {
+    var cl = IM_syncCustomerList_(true);
+    if (cl) parts.push('Client list: ' + cl.rows + ' customers' + (cl.added || cl.removed ? ' (' + cl.added + ' added, ' + cl.removed + ' removed)' : ''));
+  } catch (e) { parts.push('customers: ' + IM_friendlyText_(e.message)); }
   ss.toast(parts.join(' · '), '🔗 Interlink', 10);
 }
 
