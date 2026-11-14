@@ -189,7 +189,7 @@ function IM_syncPeopleFromMasters_(fresh) {
   var sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.PEOPLE);
   var res = { rows: 0, added: [], removed: [], moved: 0, blocked: false, overflow: false };
   if (!sh) return res;
-  if (fresh) { try { IM_clearCache(); } catch (e) {} }
+  CacheService.getScriptCache().remove(IM_CACHE_KEY + 'employees');   // people are always read fresh: someone added in Masters a minute ago must show up now
   var all = IM_getEmployees() || [];
   if (!all.length) return res;          // Masters returned nothing: never wipe the list
   var last = sh.getLastRow();
