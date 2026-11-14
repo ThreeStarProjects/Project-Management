@@ -1218,13 +1218,18 @@ function IM_needsAttentionNow(quiet) {
 function IM_employeeAttention_(add) {
   var emp = IM_mastersEmployees_();
   var shortList = function (a) { return a.slice(0, 8).join(', ') + (a.length > 8 ? ', … (+' + (a.length - 8) + ' more)' : ''); };
-  var check = function (area, where, names) {
-    var missing = [], left = [], seen = {};
+  // names = the people the list offers; allNames = everyone on it (inactive rows too) when that differs; fix = what to do if it is behind
+  var check = function (area, where, names, allNames, fix) {
+    var missing = [], left = [], seen = {}, present = {};
+    (allNames || names).forEach(function (n) { present[IM_normName_(n)] = true; });
     names.forEach(function (n) {
       n = String(n).trim(); var k = IM_normName_(n);
       if (!k || seen[k]) return; seen[k] = true;
       if (!emp.all[k]) missing.push(n); else if (emp.left[k]) left.push(n);
     });
+    var behind = emp.active.filter(function (e) { return !present[IM_normName_(e.name)]; }).map(function (e) { return e.name; });
+    if (behind.length) add('🟡', area, behind.length + ' active Masters employee(s) are not in the ' + where + ' yet: ' + shortList(behind), where,
+      fix || 'Open that system once; it adds them by itself. If they are still missing after that, ask your administrator.');
     if (missing.length) add('🟡', area, missing.length + ' name(s) in the ' + where + ' are not in Masters: ' + shortList(missing), where,
       'If they are real employees, add them in Masters (⚙ Masters → Open Admin UI). Otherwise delete them from this list.');
     if (left.length) add('🔵', area, left.length + ' employee(s) that Masters marks as Left are still in the ' + where + ': ' + shortList(left), where,
@@ -1234,17 +1239,20 @@ function IM_employeeAttention_(add) {
     if (!sh || sh.getLastRow() < 2) return [];
     return sh.getRange(2, c, sh.getLastRow() - 1, 1).getValues().map(function (r) { return r[0]; }).filter(function (v) { return String(v).trim() !== ''; });
   };
-  check('Employees', 'PM People list', col(SpreadsheetApp.getActive().getSheetByName(SHEETS.PEOPLE), 1));
-  try { check('Employees', 'IMS employee list', col(SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName('Dropdowns'), 9)); } catch (e) {}
+  check('Employees', 'PM People list', col(SpreadsheetApp.getActive().getSheetByName(SHEETS.PEOPLE), 1), null,
+    'Reload PM (or 🔗 Interlink → Refresh dropdowns from Masters). If they are still missing, ask your administrator.');
+  try { check('Employees', 'IMS employee list', col(SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName('Dropdowns'), 9), null,
+    'Open IMS once, or in IMS use 🔗 Interlink → Refresh dropdowns from Masters.'); } catch (e) {}
   try {
     var fid = Masters.getSystemSheetIds().finance;
     if (fid) {
       var m = SpreadsheetApp.openById(fid).getSheetByName('M_Employee');
       if (m && m.getLastRow() >= 2) {
         var head = m.getRange(1, 1, 1, m.getLastColumn()).getValues()[0], cA = head.indexOf('Active');
-        var names = m.getRange(2, 1, m.getLastRow() - 1, m.getLastColumn()).getValues()
-          .filter(function (r) { return String(r[0]).trim() !== '' && (cA < 0 || String(r[cA]) !== 'No'); }).map(function (r) { return r[0]; });
-        check('Employees', 'Finance employee list (M_Employee)', names);
+        var rowsF = m.getRange(2, 1, m.getLastRow() - 1, m.getLastColumn()).getValues().filter(function (r) { return String(r[0]).trim() !== ''; });
+        var names = rowsF.filter(function (r) { return cA < 0 || String(r[cA]) !== 'No'; }).map(function (r) { return r[0]; });
+        check('Employees', 'Finance employee list (M_Employee)', names, rowsF.map(function (r) { return r[0]; }),
+          'Open Finance once, or in Finance use 🔗 Interlink → Refresh employees from Masters (Finance also does it every 10 minutes).');
       }
     }
   } catch (e) {}

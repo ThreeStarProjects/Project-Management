@@ -27,6 +27,12 @@ function api_getProjectLabels() {
 }
 
 function api_getEmployees() {
+  // The workers' ticket form never opens the sheet, so bring in newly approved Masters employees here (a few seconds at most:
+  // the Masters list is cached for 5 minutes). Never blocks the form: any failure just means the list is as it was.
+  try {
+    const lk = LockService.getScriptLock();
+    if (lk.tryLock(5000)) { try { IM_syncPeopleFromMasters_(); } finally { lk.releaseLock(); } }
+  } catch (e) {}
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const p = ss.getSheetByName(SHEETS.PEOPLE);
   if (!p) return [];
