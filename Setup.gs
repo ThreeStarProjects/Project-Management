@@ -34,7 +34,6 @@ function setupSheets() {
 
   // Order matters: reference sheets first so validations from other sheets can point to them.
   createPeopleSheet_(ss);
-  createVendorsSheet_(ss);
   createProjectsSheet_(ss);
   createMilestonesSheet_(ss);
   createHardwareListSheet_(ss);
@@ -48,7 +47,7 @@ function setupSheets() {
   // Reorder tabs for a sensible left-to-right flow
   const order = [SHEETS.PROJECTS, SHEETS.VIEW, SHEETS.DASHBOARD, SHEETS.MILESTONES,
                  SHEETS.HARDWARE, SHEETS.PURCHASES, SHEETS.PRODUCTION,
-                 SHEETS.SNAGS, SHEETS.TICKETS, SHEETS.PEOPLE, SHEETS.VENDORS];
+                 SHEETS.SNAGS, SHEETS.TICKETS, SHEETS.PEOPLE];
   order.forEach((name, i) => {
     const sh = ss.getSheetByName(name);
     if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
@@ -80,7 +79,6 @@ function setNamedRanges_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const names = [
     ['PROJECT_LABELS', SHEETS.PROJECTS, 'I2:I' + MAX_ROWS],  // Projects.Label is col I now
-    ['VENDOR_NAMES',   SHEETS.VENDORS,  'A2:A1000'],
     ['PEOPLE_NAMES',   SHEETS.PEOPLE,   'A2:A100']
   ];
   ss.getNamedRanges().forEach(nr => { try { nr.remove(); } catch (e) {} });

@@ -123,6 +123,7 @@ function IM_onOpen_() {
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('🔗 Interlink')
     .addItem('➕ Add item to IMS',             'IM_addItemDialog')
+    .addItem('➕ Add supplier to IMS',         'IM_addSupplierDialog')
     .addItem('➕ Add employee',                'IM_addEmployeeDialog')
     .addItem('Refresh dropdowns from Masters', 'IM_refreshDropdowns')
     .addItem('Refresh Hardware List',          'IM_refreshHardwareNow')
@@ -274,57 +275,60 @@ function IM_syncCustomerList_(fresh) {
 }
 
 /**
- * VENDORS: IMS' Supplier Master is the master list; Masters holds a copy and PM reads that copy (suppliers with an IMS code). The 'Vendors' sheet (the dropdowns on Purchases and Tickets read it) is a
- * GENERATED COPY: active suppliers A to Z (name, contact, category, phone, email). A vendor that only PM knows (typed here by hand,
- * not in Masters) is KEPT below them, never deleted; it is named in the toast so someone can add it to Masters.
- * Returns { masters:[rows], onlyPm:[rows] } (rows = [name, contact, category, phone, email]) or null when Masters returned no supplier.
+ * VENDORS: IMS' Supplier Master is the master list; Masters holds a copy and PM reads that copy (active suppliers that have an IMS code),
+ * A to Z, de-duplicated. There is NO vendor sheet in PM: the vendor dropdowns (Purchases col I, Tickets col N) hold the names themselves
+ * (typing another name only shows a warning) and are rewritten when the list changes. Returns [[name, contact, category, phone, email]] or null.
  */
 function IM_vendorRows_() {
-  var t = function (v) { return String(v == null ? '' : v).trim(); }, seen = {}, all = {}, masters = [];
+  var t = function (v) { return String(v == null ? '' : v).trim(); }, seen = {}, rows = [];
   (IM_getParties({ isSupplier: true }) || []).forEach(function (p) {
     var n = t(p.Name).replace(/\s+/g, ' '), k = IM_normName_(n);
-    if (!k || !t(p.IMS_Supplier_Code)) return;   // only suppliers IMS lists (IMS is the master; Masters holds a copy)
-    all[k] = true;
-    if (seen[k] || String(p['Active?'] || 'Yes').toLowerCase() === 'no') return; seen[k] = true;
-    masters.push([n, t(p.Contact_Person), t(p.Category), t(p.Phone), t(p.Email)]);
+    if (!k || !t(p.IMS_Supplier_Code) || seen[k] || String(p['Active?'] || 'Yes').toLowerCase() === 'no') return; seen[k] = true;
+    rows.push([n, t(p.Contact_Person), t(p.Category), t(p.Phone), t(p.Email)]);
   });
-  if (!masters.length) return null;
-  masters.sort(function (a, b) { return a[0].toLowerCase() < b[0].toLowerCase() ? -1 : a[0].toLowerCase() > b[0].toLowerCase() ? 1 : 0; });
-  var onlyPm = [], sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.VENDORS), last = sh ? sh.getLastRow() : 0;
-  if (last >= 2) sh.getRange(2, 1, last - 1, 5).getValues().forEach(function (r) {
-    var k = IM_normName_(r[0]); if (k && !all[k]) { all[k] = true; onlyPm.push(r.map(t)); }   // not in Masters at all (active or not)
-  });
-  return { masters: masters, onlyPm: onlyPm };
+  if (!rows.length) return null;
+  rows.sort(function (a, b) { return a[0].toLowerCase() < b[0].toLowerCase() ? -1 : a[0].toLowerCase() > b[0].toLowerCase() ? 1 : 0; });
+  return rows;
 }
 
-/** Rewrites the Vendors sheet from Masters and points the vendor dropdowns (Purchases col I, Tickets col N) at it. Returns { rows, added, removed, onlyPm:[names] } or null. */
+/**
+ * Points the vendor dropdowns at the current list. The old 'Vendors' sheet is removed once every vendor on it is in Masters: a vendor only
+ * that sheet knew is first sent to IMS (once) with the same add-supplier command as ➕ Add supplier, and the sheet stays until it arrives.
+ * Returns { rows, changed, onlyPm:[names], sheetRemoved } or null (Masters returned no supplier: nothing is touched).
+ */
 function IM_syncVendorList_(fresh) {
-  var ss = SpreadsheetApp.getActive(), sh = ss.getSheetByName(SHEETS.VENDORS);
-  if (!sh) return null;
+  var ss = SpreadsheetApp.getActive();
   if (fresh) { try { CacheService.getScriptCache().remove(IM_CACHE_KEY + 'parties_{"isSupplier":true}'); } catch (e) {} }
-  var v = IM_vendorRows_();
-  if (!v) return null;                                  // Masters returned nobody: never wipe the list
-  var rows = v.masters.concat(v.onlyPm), last = sh.getLastRow();
-  var cur = last >= 2 ? sh.getRange(2, 1, last - 1, 5).getValues().map(function (r) { return r.map(function (x) { return String(x).trim(); }); }) : [];
-  var same = cur.length >= rows.length && rows.every(function (r, i) { return r.every(function (x, j) { return cur[i][j] === x; }); }) &&
-    cur.slice(rows.length).every(function (r) { return r.every(function (x) { return x === ''; }); });
-  var curNames = {}; cur.forEach(function (r) { if (r[0]) curNames[IM_normName_(r[0])] = true; });
-  var now = {}; rows.forEach(function (r) { now[IM_normName_(r[0])] = true; });
-  var res = { rows: rows.length, added: rows.filter(function (r) { return !curNames[IM_normName_(r[0])]; }).length,
-              removed: Object.keys(curNames).filter(function (k) { return !now[k]; }).length, onlyPm: v.onlyPm.map(function (r) { return r[0]; }) };
-  if (!same) {
-    if (sh.getMaxRows() < rows.length + 1) sh.insertRowsAfter(sh.getMaxRows(), rows.length + 1 - sh.getMaxRows());
-    if (last >= 2) sh.getRange(2, 1, last - 1, 5).clearContent();
-    sh.getRange(2, 1, rows.length, 5).setValues(rows);
-    try { sh.getRange('A1').setNote('Generated from Masters (suppliers). Do not type here: this sheet is rewritten automatically. A vendor not in Masters is kept at the bottom; add it in Masters to make it official.'); } catch (e) {}
+  var rows = IM_vendorRows_();
+  if (!rows) return null;
+  var names = rows.map(function (r) { return r[0]; }), res = { rows: rows.length, changed: false, onlyPm: [], sheetRemoved: false };
+  var old = ss.getSheetByName(SHEETS.VENDORS);
+  if (old) {
+    var have = {}; names.forEach(function (n) { have[IM_normName_(n)] = true; });
+    var last = old.getLastRow(), only = [];
+    if (last >= 2) old.getRange(2, 1, last - 1, 5).getValues().forEach(function (r) { var k = IM_normName_(r[0]); if (k && !have[k]) { have[k] = true; only.push(r.map(function (x) { return String(x).trim(); })); } });
+    if (!only.length) {
+      try { ss.getNamedRanges().forEach(function (nr) { if (nr.getName() === 'VENDOR_NAMES') nr.remove(); }); } catch (e) {}
+      try { ss.deleteSheet(old); res.sheetRemoved = true; } catch (e) {}
+    } else {
+      res.onlyPm = only.map(function (r) { return r[0]; });
+      try {
+        var props = PropertiesService.getDocumentProperties(), sent = JSON.parse(props.getProperty('IM_vendor_queued') || '{}');
+        only.forEach(function (r) {
+          var k = IM_normName_(r[0]); if (sent[k]) return;
+          IM_queueImsCommand_('addSupplier', { firmName: r[0], contact: r[1], category: r[2], mobile: r[3], email: r[4], forceCreate: false }); sent[k] = true;
+        });
+        props.setProperty('IM_vendor_queued', JSON.stringify(sent));
+      } catch (e) {}
+    }
   }
-  if (!same || fresh) {                                 // point the dropdowns at A2:A1000 (the old range stopped at row 100)
-    var rng = sh.getRange(2, 1, 999, 1);
-    var rule = SpreadsheetApp.newDataValidation().requireValueInRange(rng, true).setAllowInvalid(true).build();
+  var props2 = PropertiesService.getDocumentProperties(), sig = names.join('\u0001');
+  if (fresh || props2.getProperty('IM_vendor_sig') !== sig || res.sheetRemoved) {
+    var rule = SpreadsheetApp.newDataValidation().requireValueInList(names, true).setAllowInvalid(true).build();
     [[SHEETS.PURCHASES, 9], [SHEETS.TICKETS, 14]].forEach(function (x) {
-      var s2 = ss.getSheetByName(x[0]); if (s2) s2.getRange(2, x[1], Math.max(MAX_ROWS - 1, 1), 1).setDataValidation(rule);
+      var sh = ss.getSheetByName(x[0]); if (sh) sh.getRange(2, x[1], Math.max(MAX_ROWS - 1, 1), 1).setDataValidation(rule);
     });
-    try { ss.getNamedRanges().forEach(function (nr) { if (nr.getName() === 'VENDOR_NAMES') nr.remove(); }); ss.setNamedRange('VENDOR_NAMES', rng); } catch (e) {}
+    props2.setProperty('IM_vendor_sig', sig); res.changed = true;
   }
   return res;
 }
@@ -348,8 +352,8 @@ function IM_refreshDropdowns() {
   } catch (e) { parts.push('customers: ' + IM_friendlyText_(e.message)); }
   try {
     var vl = IM_syncVendorList_(true);
-    if (vl) parts.push('Vendor list: ' + vl.rows + ' vendors' + (vl.added || vl.removed ? ' (' + vl.added + ' added, ' + vl.removed + ' removed)' : '') +
-      (vl.onlyPm.length ? ' · ' + vl.onlyPm.length + ' only in PM, not in Masters: ' + vl.onlyPm.slice(0, 4).join(', ') + (vl.onlyPm.length > 4 ? ', …' : '') : ''));
+    if (vl) parts.push('Vendor list: ' + vl.rows + ' vendors' + (vl.changed ? ' (dropdowns updated)' : '') + (vl.sheetRemoved ? ' · the old Vendors sheet was removed' : '') +
+      (vl.onlyPm.length ? ' · ' + vl.onlyPm.length + ' vendor(s) only on the old Vendors sheet were sent to IMS and appear in a few minutes: ' + vl.onlyPm.slice(0, 4).join(', ') + (vl.onlyPm.length > 4 ? ', …' : '') : ''));
   } catch (e) { parts.push('vendors: ' + IM_friendlyText_(e.message)); }
   ss.toast(parts.join(' · '), '🔗 Interlink', 10);
 }

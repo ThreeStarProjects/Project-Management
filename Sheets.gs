@@ -16,14 +16,6 @@ function createPeopleSheet_(ss) {
   sh.setColumnWidth(4, 120); sh.setColumnWidth(5, 200);
 }
 
-function createVendorsSheet_(ss) {
-  const sh = ss.insertSheet(SHEETS.VENDORS);
-  sh.getRange(1, 1, 1, 5).setValues([['Vendor Name','Contact Person','Category','Phone','Email']]).setFontWeight('bold');
-  sh.setFrozenRows(1);
-  sh.setColumnWidth(1, 200); sh.setColumnWidth(2, 160); sh.setColumnWidth(3, 140);
-  sh.setColumnWidth(4, 120); sh.setColumnWidth(5, 200);
-}
-
 function createProjectsSheet_(ss) {
   const sh = ss.insertSheet(SHEETS.PROJECTS);
   const headers = [
@@ -380,7 +372,6 @@ function installDataValidations() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const R = MAX_ROWS;
   const proj = ss.getRangeByName('PROJECT_LABELS');
-  const ven  = ss.getRangeByName('VENDOR_NAMES');
   const ppl  = ss.getRangeByName('PEOPLE_NAMES');
 
   const dd = (sheetName, a1, source) => {
@@ -415,7 +406,6 @@ function installDataValidations() {
   // Purchases (Invoice# + Amount removed; PO Issued now Y/N; Variance moved; Status now col M)
   if (proj) dd(SHEETS.PURCHASES, `B2:B${R}`, proj);
   dd(SHEETS.PURCHASES, `H2:H${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
-  if (ven) dd(SHEETS.PURCHASES, `I2:I${R}`, ven);
   dd(SHEETS.PURCHASES, `J2:J${R}`, ['Yes','No']);
   dd(SHEETS.PURCHASES, `N2:N${R}`, ['Not Ordered','PO Issued','In Transit','Delivered','Rejected','On Hold']);
   date(SHEETS.PURCHASES, `K2:L${R}`);
@@ -442,7 +432,6 @@ function installDataValidations() {
   if (ppl) dd(SHEETS.TICKETS, `H2:H${R}`, ppl);
   dd(SHEETS.TICKETS, `I2:I${R}`, TICKET_STATUSES);
   if (proj) dd(SHEETS.TICKETS, `K2:K${R}`, proj);
-  if (ven) dd(SHEETS.TICKETS, `N2:N${R}`, ven);
   dd(SHEETS.TICKETS, `Q2:Q${R}`, TICKET_IMPACTS);
   date(SHEETS.TICKETS, `B2:B${R}`);
   date(SHEETS.TICKETS, `J2:J${R}`);
@@ -487,7 +476,6 @@ function installFormatting() {
   base(SHEETS.SNAGS,      13);
   base(SHEETS.TICKETS,    23);
   base(SHEETS.PEOPLE,     5);
-  base(SHEETS.VENDORS,    5);
 
   formatDashboard_(ss);
   formatProjectView_(ss);

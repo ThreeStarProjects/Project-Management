@@ -29,7 +29,6 @@ function onOpen() {
       .addItem('Reinstall Data Validations', 'installDataValidations')
       .addItem('Reinstall Formatting', 'installFormatting')
       .addItem('Reinstall Triggers', 'installTriggers')
-      .addItem('🧹 Remove All Warnings', 'removeAllWarnings')
       .addItem('Reset Named Ranges', 'resetNamedRanges'))
     .addToUi();
 }

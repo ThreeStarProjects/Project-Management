@@ -933,6 +933,21 @@ function IM_addItemListsFrom_(ims) {
 }
 function IM_addItemLists() { return IM_addItemListsFrom_(SpreadsheetApp.openById(IM_IMS_SHEET_ID)); }
 
+/** Leaves a command in IMS's hidden _PM_Commands sheet (IMS's 1-minute trigger runs it). Returns the row number. */
+function IM_queueImsCommand_(action, params, ims) {
+  ims = ims || SpreadsheetApp.openById(IM_IMS_SHEET_ID);
+  var sh = ims.getSheetByName(IM_CMD_SHEET);
+  if (!sh) {
+    sh = ims.insertSheet(IM_CMD_SHEET);
+    sh.getRange(1, 1, 1, 7).setValues([['Id', 'Action', 'Params', 'Status', 'Result', 'By', 'At']]);
+    sh.hideSheet();
+  }
+  var row = Math.max(sh.getLastRow(), 1) + 1;
+  sh.getRange(row, 1, 1, 7).setValues([['PMC-' + row, action, JSON.stringify(params), 'Pending', '',
+    Session.getActiveUser().getEmail() || 'unknown', new Date()]]);
+  return row;
+}
+
 /** Validate and queue the item. d = { itemName, size, grade, uom, category, materialType, avgRate, forceCreate }. Returns { row }. */
 function IM_addItemSubmit(d) {
   var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), lists = IM_addItemListsFrom_(ims);   // IMS is opened once
@@ -946,15 +961,7 @@ function IM_addItemSubmit(d) {
   if (isNaN(rate) || rate < 0) throw new Error('Avg rate must be a number, 0 or more.');
   var params = { itemName: name, size: String(d.size || '').trim(), grade: String(d.grade || '').trim(), uom: d.uom,
                  category: d.category, materialType: d.materialType, avgRate: rate, forceCreate: d.forceCreate === true };
-  var sh = ims.getSheetByName(IM_CMD_SHEET);
-  if (!sh) {
-    sh = ims.insertSheet(IM_CMD_SHEET);
-    sh.getRange(1, 1, 1, 7).setValues([['Id', 'Action', 'Params', 'Status', 'Result', 'By', 'At']]);
-    sh.hideSheet();
-  }
-  var row = Math.max(sh.getLastRow(), 1) + 1;
-  sh.getRange(row, 1, 1, 7).setValues([['PMC-' + row, 'addItem', JSON.stringify(params), 'Pending', '',
-    Session.getActiveUser().getEmail() || 'unknown', new Date()]]);
+  var row = IM_queueImsCommand_('addItem', params, ims);
   return { row: row };
 }
 
@@ -974,6 +981,56 @@ function IM_addItemPoll(row) {
     if (/DEADLINE|timed out|server error|try again|temporar|Service/i.test(String(e && e.message))) return { status: 'Pending', result: null, slow: true };
     throw e;
   }
+}
+
+/** Validate and queue a new supplier for IMS Supplier Master. d = { firmName, category, contact, mobile, email, gst, address, forceCreate }. Returns { row }. */
+function IM_addSupplierSubmit(d) {
+  var name = String(d.firmName || '').replace(/\s+/g, ' ').trim();
+  if (!name) throw new Error('Firm name is required.');
+  if (name.length > 120) throw new Error('Firm name is too long (max 120 characters).');
+  var t = function (v) { return String(v == null ? '' : v).trim(); };
+  if (t(d.email) && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(t(d.email))) throw new Error('The email does not look right.');
+  return { row: IM_queueImsCommand_('addSupplier', { firmName: name, category: t(d.category), contact: t(d.contact), mobile: t(d.mobile), email: t(d.email), gst: t(d.gst).toUpperCase(), address: t(d.address), forceCreate: d.forceCreate === true }) };
+}
+
+function IM_addSupplierDialog() {
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family:Arial,sans-serif;font-size:13px;padding:14px">' +
+    '<div id="form"><p style="margin-top:0"><b>Add a new supplier to IMS</b><br><span style="color:#555">It is created in IMS Supplier Master (the supplier list) and reaches the vendor dropdowns in a few minutes.</span></p>' +
+    '<label>Firm name *</label><input id="name" style="width:100%;padding:6px;margin:3px 0 8px" maxlength="120">' +
+    '<table style="width:100%"><tr><td style="width:50%;padding-right:6px"><label>Contact person</label><input id="contact" style="width:100%;padding:6px;margin:3px 0 8px"></td>' +
+    '<td><label>Mobile</label><input id="mobile" style="width:100%;padding:6px;margin:3px 0 8px"></td></tr>' +
+    '<tr><td style="padding-right:6px"><label>Email</label><input id="email" style="width:100%;padding:6px;margin:3px 0 8px"></td>' +
+    '<td><label>GST no.</label><input id="gst" style="width:100%;padding:6px;margin:3px 0 8px" maxlength="15"></td></tr></table>' +
+    '<label>Category (what they supply)</label><input id="cat" style="width:100%;padding:6px;margin:3px 0 8px">' +
+    '<label>Address</label><input id="addr" style="width:100%;padding:6px;margin:3px 0 8px">' +
+    '<p><button id="go" onclick="send(false)" style="padding:7px 18px;background:#1F4E79;color:#fff;border:0">Add to IMS</button> ' +
+    '<button onclick="google.script.host.close()" style="padding:7px 18px">Cancel</button></p></div>' +
+    '<div id="wait" style="display:none"><p id="waittxt"></p></div>' +
+    '<div id="done" style="display:none"><p id="donetxt" style="white-space:pre-wrap"></p><p id="dupbtn" style="display:none">' +
+    '<button onclick="send(true)" style="padding:7px 18px">Create anyway</button> </p>' +
+    '<p><button onclick="google.script.host.close()" style="padding:7px 18px">Close</button></p></div>' +
+    '<p id="err" style="color:#b00020"></p></div>' +
+    '<script>' +
+    'var fails=0;' +
+    'function el(i){return document.getElementById(i);}' +
+    'function fail(e){el("err").textContent=(e&&e.message)?e.message:String(e);el("go").disabled=false;}' +
+    'function transient(e){return /DEADLINE|server error|timed out|try again|temporar|storage|Service/i.test((e&&e.message)?e.message:String(e));}' +
+    'function send(force){el("err").textContent="";fails=0;var d={firmName:el("name").value,contact:el("contact").value,mobile:el("mobile").value,email:el("email").value,gst:el("gst").value,category:el("cat").value,address:el("addr").value,forceCreate:force};' +
+    'if(!d.firmName.trim()){fail("Fill the firm name.");return;}' +
+    'el("go").disabled=true;google.script.run.withSuccessHandler(function(r){wait(r.row,0);}).withFailureHandler(fail).IM_addSupplierSubmit(d);}' +
+    'function wait(row,n){el("form").style.display="none";el("done").style.display="none";el("wait").style.display="block";' +
+    'el("waittxt").textContent="Sent to IMS, waiting for it to be created ("+(n*6)+"s). IMS picks it up within a minute."+(fails?" Google is a little slow, still trying.":"");' +
+    'if(n>25){finish("IMS has not answered yet. Your request was sent: look in IMS Supplier Master before sending it again.",false);return;}' +
+    'setTimeout(function(){google.script.run.withSuccessHandler(function(p){if(p.status==="Pending"){wait(row,n+1);return;}fails=0;' +
+    'var r=p.result||{};if(r.success){finish("Added "+r.code+"\\n"+r.message+"\\n\\nIt reaches the vendor dropdowns within a few minutes (or use Refresh dropdowns from Masters).",false);}' +
+    'else if(r.duplicate){finish(r.message+"\\n\\nIf this really is a different firm, create it anyway.",true);}else{finish("Not added: "+(r.message||"unknown error"),false);}})' +
+    '.withFailureHandler(function(e){if(transient(e)&&fails<10){fails++;wait(row,n+1);return;}' +
+    'finish("Your request was sent to IMS, but this window could not read the answer ("+((e&&e.message)?e.message:e)+"). Look in IMS Supplier Master before sending it again.",false);}).IM_addItemPoll(row);},6000);}' +
+    'function finish(t,dup){el("wait").style.display="none";el("done").style.display="block";el("donetxt").textContent=t;el("dupbtn").style.display=dup?"block":"none";}' +
+    '</script>'
+  ).setWidth(470).setHeight(540);
+  SpreadsheetApp.getUi().showModalDialog(html, '➕ Add supplier to IMS');
 }
 
 function IM_addItemDialog() {

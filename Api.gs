@@ -47,20 +47,12 @@ function api_getEmployees() {
 }
 
 function api_getVendors() {
-  // Masters' suppliers (plus any vendor only PM knows); if Masters cannot be read, the generated Vendors sheet (the last copy of the same list).
+  // The suppliers IMS lists (Masters holds the copy). There is no vendor sheet in PM any more.
   try {
     const v = IM_vendorRows_();
-    if (v) return v.masters.concat(v.onlyPm).map(r => ({ name: r[0], contact: r[1], category: r[2], phone: r[3], email: r[4] }));
+    if (v) return v.map(r => ({ name: r[0], contact: r[1], category: r[2], phone: r[3], email: r[4] }));
   } catch (e) {}
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const v = ss.getSheetByName(SHEETS.VENDORS);
-  if (!v) return [];
-  const last = v.getLastRow();
-  if (last < 2) return [];
-  return v.getRange(2, 1, last - 1, 5).getValues()
-    .filter(r => r[0])
-    .map(r => ({ name: String(r[0]).trim(), contact: String(r[1] || '').trim(), category: String(r[2] || '').trim(),
-                 phone: String(r[3] || '').trim(), email: String(r[4] || '').trim() }));
+  return [];
 }
 
 function api_getTicketConfig() {
