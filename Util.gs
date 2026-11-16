@@ -37,14 +37,3 @@ function findRowByValue_(sheet, col, value) {
   return null;
 }
 
-function deleteAllRowsByValue_(sheet, col, value) {
-  if (!sheet) return 0;
-  const last = sheet.getLastRow();
-  if (last < 2) return 0;
-  const vals = sheet.getRange(2, col, last - 1, 1).getValues();
-  let deleted = 0;
-  for (let i = vals.length - 1; i >= 0; i--) {
-    if (vals[i][0] === value) { sheet.deleteRow(i + 2); deleted++; }
-  }
-  return deleted;
-}

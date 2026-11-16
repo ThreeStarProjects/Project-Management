@@ -102,15 +102,3 @@ function installTriggers() {
 }
 
 // ── PROTECTIONS ────────────────────────────────────────────────────────────
-/**
- * Strips every 3SP warning-only protection from the spreadsheet. Previous
- * builds installed protections on header rows, read-only tabs, and ARRAYFORMULA
- * seed cells — those triggered the "Heads up" dialog on every edit. Protection
- * is no longer installed; this function just cleans up any old ones.
- *
- * If a formula seed gets accidentally wiped, run menu → ⚙️ Setup → Reseed Formulas.
- */
-function removeAllWarnings() {
-  removeScriptProtections_();
-  SpreadsheetApp.getUi().alert('✅ All 3SP warning banners removed.');
-}
