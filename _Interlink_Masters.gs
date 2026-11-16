@@ -125,6 +125,7 @@ function IM_onOpen_() {
   } catch (e) {}
   try { IM_syncCustomerList_(); } catch (e) {}              // the Client dropdown on the Projects sheet (Finance's customers, via Masters)
   try { IM_syncVendorList_(); } catch (e) {}                // the Vendors sheet behind the vendor dropdowns (Masters' suppliers)
+  try { IM_fillSpec_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null); } catch (e) {}   // Specification = IMS description for rows still blank
   try { IM_selfTestAnnounce_(); } catch (e) {}              // how the last self-test ended
   try { IM_installHelpNotes_(); } catch (e) {}              // explanations on the Hardware List headers
   try { IM_healFormulaColumns_(); } catch (e) {}            // an automatic formula someone typed over comes back

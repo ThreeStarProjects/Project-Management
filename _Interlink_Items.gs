@@ -85,6 +85,7 @@ function IM_installItems() {
     'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:M"),"select Col1,Col13 where Col1 is not null",0)}');
   it.getRange('E2').setFormula('=ARRAYFORMULA(IF(A2:A="","",IFERROR(VLOOKUP(A2:A,H:I,2,FALSE),0)))');
   IM_writeStatusImports_(it);
+  IM_ensureSpecImport_(it);
   it.hideSheet();
 
   // --- per-sheet column migration -----------------------------------------
@@ -281,7 +282,7 @@ function IM_onHardwareItemEdit_(e) {
     var t = IM_itemSheets_().filter(function (x) { return x.name === sh.getName(); })[0];
     if (!t || r.getRow() < 2 || r.getNumRows() !== 1 || r.getNumColumns() !== 1) return;
     var col = r.getColumn();
-    if (col === IM_MAT_COL) IM_fillUnit_(e, sh, t, r);
+    if (col === IM_MAT_COL) { IM_fillUnit_(e, sh, t, r); IM_fillSpec_(sh, [r.getRow()]); }
     if (t.name === SHEETS.HARDWARE && col === IM_HW_RESERVE_COL && r.getValue() === true) IM_onReserveTicked_(e, sh, r.getRow());
     if (t.name === SHEETS.HARDWARE && (col === 2 || col === IM_MAT_COL || col === 5)) IM_refreshStockStatus_([r.getRow()]);  // Stock Status fills itself
   } catch (err) {
@@ -299,6 +300,49 @@ function IM_onReserveTicked_(e, sh, row) {
   if (failed && !/already (requested|sent)/.test(res)) sh.getRange(row, IM_HW_RESERVE_COL).setValue(false);
   var msg = failed ? IM_friendlyText_(res) : res + (/reserving/.test(res) ? '. IMS confirms within about a minute.' : '');
   e.source.toast(msg, 'Hardware List', 10);
+}
+
+// -----------------------------------------------------------------------------
+// SPECIFICATION (col D on Hardware List and Purchases) shows the IMS item's Description (Item Master / SFG Master col C).
+// The hidden _IMS_Items sheet imports code + description into F:G. When a Material is picked, D is filled with that description.
+// A specification someone typed by hand is never overwritten: D is only written when it is blank or still holds a description
+// that came from IMS (so changing the Material changes it, and a free-text material clears it).
+// -----------------------------------------------------------------------------
+function IM_ensureSpecImport_(it) {
+  if (!it || it.getRange('F1').getValue() === 'Desc Code') return false;
+  it.getRange('F1:G1').setValues([['Desc Code', 'Description']]);
+  it.getRange('F2').setFormula(
+    '={QUERY(IMPORTRANGE("' + IM_IMS_SHEET_ID + '","Item Master!A2:C"),"select Col1,Col3 where Col1 is not null",0);' +
+    'QUERY(IMPORTRANGE("' + IM_IMS_SHEET_ID + '","SFG Master!A2:C"),"select Col1,Col3 where Col1 is not null",0)}');
+  SpreadsheetApp.flush();
+  return true;
+}
+
+/** rows = [row numbers] or null (every row). Returns how many Specification cells were written. Never throws. */
+function IM_fillSpec_(sh, rows) {
+  try {
+    var it = SpreadsheetApp.getActive().getSheetByName(IM_ITEMS_SHEET);
+    if (!it || !sh) return 0;
+    IM_ensureSpecImport_(it);
+    var last = it.getLastRow(); if (last < 2) return 0;
+    var data = it.getRange(2, 1, last - 1, 7).getValues(), codeOf = {}, descOf = {}, isDesc = {};
+    data.forEach(function (x) { if (x[1] !== '') codeOf[x[1]] = x[0]; });
+    data.forEach(function (x) { var d = String(x[6]).trim(); if (x[5] !== '' && d && d.charAt(0) !== '#') { descOf[x[5]] = d; isDesc[d] = true; } });
+    if (!Object.keys(descOf).length) return 0;            // descriptions not loaded yet: touch nothing
+    var n = sh.getLastRow() - 1; if (n < 1) return 0;
+    var all = !rows, first = all ? 2 : Math.min.apply(null, rows), cnt = all ? n : Math.max.apply(null, rows) - first + 1;
+    var vals = sh.getRange(first, IM_MAT_COL, cnt, 2).getValues(), want = {}, changed = 0;   // C Material, D Specification
+    (all ? vals.map(function (_, i) { return first + i; }) : rows).forEach(function (r) { want[r] = true; });
+    vals.forEach(function (v, i) {
+      if (!want[first + i]) return;
+      var cur = String(v[1]).trim(), code = codeOf[v[0]], d = code !== undefined ? (descOf[code] || '') : '';
+      if (cur !== '' && !isDesc[cur]) return;             // typed by hand: leave it
+      if (all && v[0] === '') return;                     // whole-sheet pass never clears anything on empty rows
+      if (cur === d) return;
+      sh.getRange(first + i, IM_MAT_COL + 1).setValue(d); changed++;
+    });
+    return changed;
+  } catch (err) { Logger.log('IM_fillSpec_ error: ' + err.message); return 0; }
 }
 
 /** Fill Unit from the picked IMS item's UOM, if the Unit cell is blank. */
