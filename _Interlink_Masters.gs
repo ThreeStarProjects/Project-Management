@@ -274,8 +274,8 @@ function IM_syncCustomerList_(fresh) {
 }
 
 /**
- * VENDORS: Masters (Parties flagged Supplier) is the master list. The 'Vendors' sheet (the dropdowns on Purchases and Tickets read it) is a
- * GENERATED COPY: active Masters suppliers A to Z (name, contact, category, phone, email). A vendor that only PM knows (typed here by hand,
+ * VENDORS: IMS' Supplier Master is the master list; Masters holds a copy and PM reads that copy (suppliers with an IMS code). The 'Vendors' sheet (the dropdowns on Purchases and Tickets read it) is a
+ * GENERATED COPY: active suppliers A to Z (name, contact, category, phone, email). A vendor that only PM knows (typed here by hand,
  * not in Masters) is KEPT below them, never deleted; it is named in the toast so someone can add it to Masters.
  * Returns { masters:[rows], onlyPm:[rows] } (rows = [name, contact, category, phone, email]) or null when Masters returned no supplier.
  */
@@ -283,7 +283,7 @@ function IM_vendorRows_() {
   var t = function (v) { return String(v == null ? '' : v).trim(); }, seen = {}, all = {}, masters = [];
   (IM_getParties({ isSupplier: true }) || []).forEach(function (p) {
     var n = t(p.Name).replace(/\s+/g, ' '), k = IM_normName_(n);
-    if (!k) return;
+    if (!k || !t(p.IMS_Supplier_Code)) return;   // only suppliers IMS lists (IMS is the master; Masters holds a copy)
     all[k] = true;
     if (seen[k] || String(p['Active?'] || 'Yes').toLowerCase() === 'no') return; seen[k] = true;
     masters.push([n, t(p.Contact_Person), t(p.Category), t(p.Phone), t(p.Email)]);
