@@ -695,6 +695,8 @@ function ensureTopRows_() {
   try { if (!lock.tryLock(20000)) return 0; } catch (e) { return 0; }
   let moved = 0, ready = true;
   try {
+    // cleanup: old PUR_* named ranges (PUR_MATERIAL, PUR_AMOUNT ...) point at a deleted area (#REF!); nothing uses them
+    try { ss.getNamedRanges().forEach(function (nr) { if (/^PUR_/.test(nr.getName())) nr.remove(); }); } catch (e) {}
     FILTER_SHEETS.forEach(function (name) {
       const sh = ss.getSheetByName(name);
       if (!sh) return;
