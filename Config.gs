@@ -24,6 +24,18 @@ const SHEETS = {
   DASHBOARD:  'Dashboard'
 };
 
+// Hardware List / Purchases / Production start with TOP_ROWS control rows (a merged "Project filter" dropdown), then the header row, then the
+// data. So their header is row 1 + TOP_ROWS and their first data row is 2 + TOP_ROWS; every other sheet keeps header row 1 / data from row 2.
+// ensureTopRows_() (Sheets.gs) moves a sheet that is still in the old layout, by itself, the first time anything runs.
+const TOP_ROWS = 2;
+const FILTER_SHEETS = ['Hardware List', 'Purchases', 'Production'];
+const FILTER_HEADERS = { 'Hardware List': 'Hardware ID', 'Purchases': 'Purchase ID', 'Production': 'Production ID' };  // what A holds on the header row
+const FILTER_ALL = 'All projects';
+const FILTER_LIST_SHEET = '_Filter';   // hidden: "All projects" + the project labels, the dropdown's list
+const FILTER_LABEL_COL = 2;            // B1:B2 merged: the words "Project filter"
+const FILTER_CELL_COL  = 3;            // C1:C2 merged: the dropdown (A is frozen on these sheets and a merge cannot cross that line)
+const FILTER_PROJECT_COL = 2;          // B: the Project column the filter works on
+
 /** Sheets from earlier builds (webapp era + v2 pre-slim). Deleted on setupAll if present. */
 const LEGACY_SHEETS = [
   'Invoices',       // dropped — no financial tracking

@@ -30,7 +30,7 @@ var IM_RSV_REGISTER = 'Reservation Register';  // IMS sheet; A:P, see IMS _Inter
 function IM_installReserve() {
   var hw = SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE);
   if (!hw) { IM_sayR_('Hardware List sheet not found.'); return; }
-  hw.getRange(1, IM_HW_RSV_COL).setValue('IMS Reservation')
+  hw.getRange(hdrRow_(hw), IM_HW_RSV_COL).setValue('IMS Reservation')
     .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG)
     .setFontWeight('bold').setFontSize(11)
     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
@@ -86,7 +86,7 @@ function IM_queueReservations_(items) {
 function IM_refreshReservationStatus(quiet) {  // quiet = from onOpen: no toast unless something changed
   var ss = SpreadsheetApp.getActive();
   var hw = ss.getSheetByName(SHEETS.HARDWARE);
-  if (!hw || hw.getLastRow() < 2) return;
+  if (!hw || hw.getLastRow() < firstRow_(hw)) return;
 
   var reg = SpreadsheetApp.openById(IM_IMS_SHEET_ID).getSheetByName(IM_RSV_REGISTER);
   var byId = {}, state = {};  // request id → Register row; reservation no → Register row
@@ -102,7 +102,7 @@ function IM_refreshReservationStatus(quiet) {  // quiet = from onOpen: no toast 
     return s === 'Released' ? 'released' : s === 'Consumed' ? 'consumed' : null;
   };
 
-  var k = hw.getRange(2, IM_HW_RSV_COL, hw.getLastRow() - 1, 1).getValues();
+  var f0 = firstRow_(hw), k = hw.getRange(f0, IM_HW_RSV_COL, hw.getLastRow() - f0 + 1, 1).getValues();
   var changed = 0;
   k.forEach(function (cell, i) {
     var s = String(cell[0]), next = null, m;
@@ -115,8 +115,8 @@ function IM_refreshReservationStatus(quiet) {  // quiet = from onOpen: no toast 
       if (w) next = m[1] + ' | ' + w + ' ' + m[3];
     }
     if (next && next !== s) {
-      hw.getRange(i + 2, IM_HW_RSV_COL).setValue(next); changed++;
-      var cell = hw.getRange(i + 2, IM_HW_ITEMSTATUS_COL);   // hover the Item Status cell to see why, in plain words
+      hw.getRange(i + f0, IM_HW_RSV_COL).setValue(next); changed++;
+      var cell = hw.getRange(i + f0, IM_HW_ITEMSTATUS_COL);   // hover the Item Status cell to see why, in plain words
       if (next.charAt(0) === '⚠') cell.setNote('IMS refused this reservation. ' + IM_friendlyText_(next.replace(/^⚠\s*/, '')));
       else if (s.charAt(0) === '⚠') cell.clearNote();
     }

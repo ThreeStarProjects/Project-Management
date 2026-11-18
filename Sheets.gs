@@ -94,6 +94,7 @@ function createMilestonesSheet_(ss) {
 }
 
 function createHardwareListSheet_(ss) {
+  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
   const sh = ss.insertSheet(SHEETS.HARDWARE);
   const headers = [
     'Hardware ID',          // A  auto HW-###
@@ -124,6 +125,7 @@ function createHardwareListSheet_(ss) {
 }
 
 function createPurchasesSheet_(ss) {
+  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
   const sh = ss.insertSheet(SHEETS.PURCHASES);
   const headers = [
     'Purchase ID',      // A  auto PUR-###
@@ -154,6 +156,7 @@ function createPurchasesSheet_(ss) {
 }
 
 function createProductionSheet_(ss) {
+  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
   const sh = ss.insertSheet(SHEETS.PRODUCTION);
   const headers = [
     'Production ID',    // A  auto PROD-###
@@ -369,6 +372,7 @@ function createDashboardSheet_(ss) {
 // ── DATA VALIDATIONS ───────────────────────────────────────────────────────
 
 function installDataValidations() {
+  ensureTopRows_();   // the three table sheets first get their control rows, so every range below lands on real data rows
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const R = MAX_ROWS;
   const proj = ss.getRangeByName('PROJECT_LABELS');
@@ -380,12 +384,12 @@ function installDataValidations() {
     const b = SpreadsheetApp.newDataValidation();
     if (Array.isArray(source)) b.requireValueInList(source, true).setAllowInvalid(false);
     else                        b.requireValueInRange(source, true).setAllowInvalid(true);
-    sh.getRange(a1).setDataValidation(b.build());
+    sh.getRange(shiftA1_(sh, a1)).setDataValidation(b.build());
   };
   const date = (sheetName, a1) => {
     const sh = ss.getSheetByName(sheetName);
     if (!sh) return;
-    sh.getRange(a1).setDataValidation(SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(true).build());
+    sh.getRange(shiftA1_(sh, a1)).setDataValidation(SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(true).build());
   };
 
   // Projects (Owner col removed, Contract col removed)
@@ -455,18 +459,20 @@ function colLetter_(n) {
 // ── FORMATTING ─────────────────────────────────────────────────────────────
 
 function installFormatting() {
+  ensureTopRows_();
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const base = (name, cols) => {
     const sh = ss.getSheetByName(name);
     if (!sh) return;
-    sh.getRange(1, 1, 1, cols)
+    const h = hdrRow_(sh), f = firstRow_(sh), n = Math.min(MAX_ROWS - 1, sh.getMaxRows() - f + 1);   // header row, first data row, how many rows
+    sh.getRange(h, 1, 1, cols)
       .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG)
       .setFontWeight('bold').setFontSize(11)
       .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
-    sh.setRowHeight(1, 36);
+    sh.setRowHeight(h, 36);
     sh.getBandings().forEach(b => b.remove());
-    sh.getRange(2, 1, MAX_ROWS - 1, cols).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false);
-    sh.getRange(2, 1, MAX_ROWS - 1, cols).setVerticalAlignment('middle').setFontSize(10);
+    sh.getRange(f, 1, n, cols).applyRowBanding(SpreadsheetApp.BandingTheme.LIGHT_GREY, false, false);
+    sh.getRange(f, 1, n, cols).setVerticalAlignment('middle').setFontSize(10);
   };
   base(SHEETS.PROJECTS,   17);
   base(SHEETS.MILESTONES, 27);
@@ -566,18 +572,18 @@ function applyAllCF_(ss) {
   ]));
   // Hardware List: Stock Status (J)
   sh = ss.getSheetByName(SHEETS.HARDWARE);
-  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(`J2:J${R}`), [
+  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(shiftA1_(sh, `J2:J${R}`)), [
     ['In Stock',     COLORS.DONE_BG, COLORS.DONE_FG],
     ['Out of Stock', COLORS.BAD_BG,  COLORS.BAD_FG]
   ]));
   // Purchases: PO Issued (J), Status (N)
   sh = ss.getSheetByName(SHEETS.PURCHASES);
   if (sh) sh.setConditionalFormatRules([
-    ...cfRules_(sh.getRange(`J2:J${R}`), [
+    ...cfRules_(sh.getRange(shiftA1_(sh, `J2:J${R}`)), [
       ['Yes', COLORS.DONE_BG, COLORS.DONE_FG],
       ['No',  COLORS.PENDING_BG, COLORS.PENDING_FG]
     ]),
-    ...cfRules_(sh.getRange(`N2:N${R}`), [
+    ...cfRules_(sh.getRange(shiftA1_(sh, `N2:N${R}`)), [
       ['Delivered',   COLORS.DONE_BG,     COLORS.DONE_FG],
       ['In Transit',  COLORS.PROGRESS_BG, COLORS.PROGRESS_FG],
       ['PO Issued',   COLORS.PROGRESS_BG, COLORS.PROGRESS_FG],
@@ -589,12 +595,12 @@ function applyAllCF_(ss) {
   // Production: Status (M), QC Status (K)
   sh = ss.getSheetByName(SHEETS.PRODUCTION);
   if (sh) sh.setConditionalFormatRules([
-    ...cfRules_(sh.getRange(`M2:M${R}`), [
+    ...cfRules_(sh.getRange(shiftA1_(sh, `M2:M${R}`)), [
       ['Completed',   COLORS.DONE_BG,     COLORS.DONE_FG],
       ['In Progress', COLORS.PROGRESS_BG, COLORS.PROGRESS_FG],
       ['Not Started', COLORS.PENDING_BG,  COLORS.PENDING_FG]
     ]),
-    ...cfRules_(sh.getRange(`K2:K${R}`), [
+    ...cfRules_(sh.getRange(shiftA1_(sh, `K2:K${R}`)), [
       ['Pass',          COLORS.DONE_BG,     COLORS.DONE_FG],
       ['Fail',          COLORS.BAD_BG,      COLORS.BAD_FG],
       ['Pending',       COLORS.PENDING_BG,  COLORS.PENDING_FG],
@@ -661,11 +667,11 @@ function applyProjectColorBands_(ss) {
     const sh = ss.getSheetByName(sheetName);
     if (!sh) return;
     const existing = sh.getConditionalFormatRules();
-    const rowRange = sh.getRange(`A2:${lastCol}${R}`);
+    const f = firstRow_(sh), rowRange = sh.getRange(`A${f}:${lastCol}${Math.min(R + f - 2, sh.getMaxRows())}`);
     const colorRules = PROJECT_PALETTE.map((color, i) =>
       SpreadsheetApp.newConditionalFormatRule()
         .whenFormulaSatisfied(
-          `=AND($${projCol}2<>"", MOD(IFERROR(VALUE(REGEXEXTRACT($${projCol}2, "\\d+")),0), 8)=${i})`
+          `=AND($${projCol}${f}<>"", MOD(IFERROR(VALUE(REGEXEXTRACT($${projCol}${f}, "\\d+")),0), 8)=${i})`
         )
         .setBackground(color)
         .setRanges([rowRange])
@@ -673,4 +679,91 @@ function applyProjectColorBands_(ss) {
     );
     sh.setConditionalFormatRules(existing.concat(colorRules));
   });
+}
+
+// ── PROJECT FILTER (control rows above the table) ────────────────────────────────────────────────
+// Hardware List / Purchases / Production: rows 1-2 hold a merged dropdown (C1:C2, "All projects" or one project) with the words "Project filter"
+// beside it (B1:B2); the header is row 3, the data starts on row 4. Picking a project hides every other project's rows (a normal sheet filter on
+// the Project column, so formulas, new rows and the scripts keep working); "All projects" shows everything again. Rows with no project stay
+// visible so a new row can be typed. Typing in a new row while a project is picked fills its Project in.
+function ensureTopRows_() {
+  const cache = CacheService.getScriptCache();
+  try { if (cache.get('top_rows_ok') === '1') return 0; } catch (e) {}
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return 0;
+  const lock = LockService.getDocumentLock();
+  try { if (!lock.tryLock(20000)) return 0; } catch (e) { return 0; }
+  let moved = 0, ready = true;
+  try {
+    FILTER_SHEETS.forEach(function (name) {
+      const sh = ss.getSheetByName(name);
+      if (!sh) return;
+      if (String(sh.getRange(1, 1).getValue()).trim() === FILTER_HEADERS[name]) {   // still the old layout: the header is on row 1
+        sh.insertRowsBefore(1, TOP_ROWS);                                              // native insert: formulas, validations, colours, banding move with their rows
+        moved++;
+      }
+      if (String(sh.getRange(hdrRow_(sh), 1).getValue()).trim() !== FILTER_HEADERS[name]) { ready = false; return; }   // not a layout we know: leave it alone
+      setupProjectFilter_(sh);
+    });
+  } finally { try { lock.releaseLock(); } catch (e) {} }
+  if (ready) { try { cache.put('top_rows_ok', '1', 21600); } catch (e) {} }
+  return moved;
+}
+
+/** Idempotent: the merged cells, the dropdown, its list, the frozen header and the sheet filter. */
+function setupProjectFilter_(sh) {
+  const ss = sh.getParent();
+  let list = ss.getSheetByName(FILTER_LIST_SHEET);
+  if (!list) {
+    list = ss.insertSheet(FILTER_LIST_SHEET);
+    list.getRange('A1').setValue(FILTER_ALL);
+    list.getRange('A2').setFormula('=IFERROR(FILTER(PROJECT_LABELS,PROJECT_LABELS<>""),"")');
+    list.hideSheet();
+  }
+  const lab = sh.getRange(1, FILTER_LABEL_COL, TOP_ROWS, 1), cell = sh.getRange(1, FILTER_CELL_COL, TOP_ROWS, 1);
+  if (!lab.isPartOfMerge()) lab.merge();
+  if (!cell.isPartOfMerge()) cell.merge();
+  lab.setValue('Project filter ▶').setFontWeight('bold').setFontColor('#1F3864').setHorizontalAlignment('right').setVerticalAlignment('middle').setBackground('#EAF1FB');
+  const cur = String(sh.getRange(1, FILTER_CELL_COL).getValue()).trim();
+  cell.setDataValidation(SpreadsheetApp.newDataValidation().requireValueInRange(list.getRange('A1:A500'), true).setAllowInvalid(false).build())
+      .setFontWeight('bold').setFontSize(11).setHorizontalAlignment('center').setVerticalAlignment('middle').setBackground('#FFF2CC')
+      .setBorder(true, true, true, true, null, null, '#BF9000', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+  if (!cur) sh.getRange(1, FILTER_CELL_COL).setValue(FILTER_ALL);
+  sh.getRange(1, FILTER_CELL_COL).setNote('Pick a project to show only its rows. "All projects" shows everything. Rows with no project stay visible so you can add one.');
+  sh.setRowHeights(1, TOP_ROWS, 24);
+  if (sh.getFrozenRows() !== hdrRow_(sh)) sh.setFrozenRows(hdrRow_(sh));
+  if (!sh.getFilter()) {
+    const h = hdrRow_(sh);
+    sh.getRange(h, 1, Math.max(sh.getMaxRows() - h + 1, 1), Math.max(sh.getLastColumn(), 1)).createFilter();
+  }
+}
+
+/** Show only `label`'s rows (blank-project rows stay); '' / "All projects" removes the filter. */
+function applyProjectFilter_(sh, label) {
+  const f = sh.getFilter();
+  if (!f) return;
+  const want = String(label || '').trim();
+  if (!want || want === FILTER_ALL) { f.removeColumnFilterCriteria(FILTER_PROJECT_COL); return; }
+  const first = firstRow_(sh), last = sh.getLastRow(), seen = {}, hidden = [];
+  if (last >= first) sh.getRange(first, FILTER_PROJECT_COL, last - first + 1, 1).getValues().forEach(function (r) {
+    const v = r[0];
+    if (v !== '' && v !== null && String(v) !== want && !seen[v]) { seen[v] = true; hidden.push(v); }
+  });
+  f.setColumnFilterCriteria(FILTER_PROJECT_COL, SpreadsheetApp.newFilterCriteria().setHiddenValues(hidden.map(String)).build());
+}
+
+/** Edit trigger: the dropdown changed -> filter. A typed cell in a new row while a project is picked -> that Project fills in. */
+function handleProjectFilterEdit_(e) {
+  const range = e.range, sh = range.getSheet();
+  if (FILTER_SHEETS.indexOf(sh.getName()) < 0) return;
+  const row = range.getRow(), col = range.getColumn();
+  if (row <= TOP_ROWS) {
+    if (col === FILTER_CELL_COL) applyProjectFilter_(sh, sh.getRange(1, FILTER_CELL_COL).getValue());
+    return;
+  }
+  if (range.getNumRows() !== 1 || range.getNumColumns() !== 1 || col === FILTER_PROJECT_COL || col === 1 || row < firstRow_(sh)) return;
+  const picked = String(sh.getRange(1, FILTER_CELL_COL).getValue()).trim();
+  if (!picked || picked === FILTER_ALL || range.getValue() === '') return;
+  const p = sh.getRange(row, FILTER_PROJECT_COL);
+  if (p.getValue() === '') p.setValue(picked);
 }

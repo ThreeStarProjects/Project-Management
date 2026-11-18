@@ -255,6 +255,8 @@ function rebuildOneSheet_(name, createFn, formatFn) {
     ss.deleteSheet(old);
   }
   createFn(ss);
+  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
+  ensureTopRows_();   // a rebuilt Hardware List / Purchases / Production gets its filter rows again
   if (formatFn) formatFn(ss);
   ui.alert('✅ ' + name + ' rebuilt.');
 }
@@ -271,15 +273,15 @@ function importPurchasesIntoHardwareList() {
   const hwSheet  = ss.getSheetByName(SHEETS.HARDWARE);
   if (!purSheet || !hwSheet) { ui.alert('Missing Purchases or Hardware List sheet.'); return; }
 
-  const purLast = purSheet.getLastRow();
-  if (purLast < 2) { ui.alert('No purchases to import.'); return; }
+  const purLast = purSheet.getLastRow(), pf = firstRow_(purSheet), hf = firstRow_(hwSheet);
+  if (purLast < pf) { ui.alert('No purchases to import.'); return; }
 
-  const purData = purSheet.getRange(2, 1, purLast - 1, 8).getValues();
+  const purData = purSheet.getRange(pf, 1, purLast - pf + 1, 8).getValues();
 
   const alreadyPushed = new Set();
   const hwLast = hwSheet.getLastRow();
-  if (hwLast >= 2) {
-    hwSheet.getRange(2, IM_HW_PUSHED_COL, hwLast - 1, 1).getValues().forEach(r => {
+  if (hwLast >= hf) {
+    hwSheet.getRange(hf, IM_HW_PUSHED_COL, hwLast - hf + 1, 1).getValues().forEach(r => {
       if (r[0]) alreadyPushed.add(String(r[0]));
     });
   }

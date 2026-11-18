@@ -9,6 +9,8 @@
 function onEditHandler(e) {
   try {
     if (!e || !e.range) return;
+    ensureTopRows_();             // a table sheet still in the old layout is moved first, so every row number below is right
+    handleProjectFilterEdit_(e);  // the filter dropdown (rows 1-2), or a new row typed while a project is picked
     handleAutoIdGeneration_(e);
     handleHardwareListEdit_(e);
   } catch (err) {
@@ -27,7 +29,7 @@ function handleAutoIdGeneration_(e) {
   if (!prefix) return;
   const startRow = range.getRow(), numRows = range.getNumRows();
   const startCol = range.getColumn(), numCols = range.getNumColumns();
-  if (startRow < 2) return;
+  if (startRow < firstRow_(sheet)) return;   // the header / filter rows never get an ID
   if (startCol === 1 && numCols === 1) return; // user typing ID manually
 
   const colARange = sheet.getRange(startRow, 1, numRows, 1);
@@ -54,7 +56,7 @@ function handleHardwareListEdit_(e) {
   const range = e.range;
   const sheet = range.getSheet();
   if (sheet.getName() !== SHEETS.HARDWARE) return;
-  if (range.getRow() < 2) return;
+  if (range.getRow() < firstRow_(sheet)) return;
 
   const startCol = range.getColumn();
   const numCols  = range.getNumColumns();

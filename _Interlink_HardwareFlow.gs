@@ -51,14 +51,14 @@ function IM_stockStatusFor_(req, stock) {
 function IM_refreshStockStatus_(only) {
   var ss = SpreadsheetApp.getActive();
   var hw = ss.getSheetByName(SHEETS.HARDWARE), it = ss.getSheetByName(IM_ITEMS_SHEET);
-  if (!hw || !it || hw.getLastRow() < 2) return 0;
+  if (!hw || !it || hw.getLastRow() < firstRow_(hw)) return 0;
   var lock = LockService.getDocumentLock();
   if (!lock.tryLock(10000)) return 0;
   try {
     if (it.getMaxColumns() < IM_AUTO_VAL_COL) it.insertColumnsAfter(it.getMaxColumns(), IM_AUTO_VAL_COL - it.getMaxColumns());
     SpreadsheetApp.flush();  // let the In Stock formula settle before reading it
-    var n = hw.getLastRow() - 1;
-    var v = hw.getRange(2, 1, n, IM_HW_RSV_COL).getValues();
+    var f0 = firstRow_(hw), n = hw.getLastRow() - f0 + 1;
+    var v = hw.getRange(f0, 1, n, IM_HW_RSV_COL).getValues();
     var ml = it.getLastRow(), mine = {};  // Hardware ID → value this script last wrote
     if (ml >= 2) it.getRange(2, IM_AUTO_ID_COL, ml - 1, 2).getValues().forEach(function (r) { if (r[0] !== '') mine[r[0]] = r[1]; });
     var want = null;
@@ -72,10 +72,10 @@ function IM_refreshStockStatus_(only) {
       var owned = cur === '' || (mine[id] !== undefined && cur === mine[id]);  // blank, or still the script's own value
       if (!owned) return;                                                       // chosen by hand: respect it
       var target = (r[1] && r[2]) ? IM_stockStatusFor_(Number(r[4]), r[5]) : '';
-      if ((!want || want[i + 2]) && target && cur !== target) { r[IM_HW_STATUS_COL - 1] = target; cur = target; changed++; }
+      if ((!want || want[i + f0]) && target && cur !== target) { r[IM_HW_STATUS_COL - 1] = target; cur = target; changed++; }
       if (cur !== '') keep.push([id, cur]);
     });
-    if (changed) hw.getRange(2, IM_HW_STATUS_COL, n, 1).setValues(v.map(function (r) { return [r[IM_HW_STATUS_COL - 1]]; }));
+    if (changed) hw.getRange(f0, IM_HW_STATUS_COL, n, 1).setValues(v.map(function (r) { return [r[IM_HW_STATUS_COL - 1]]; }));
     if (ml >= 2) it.getRange(2, IM_AUTO_ID_COL, ml - 1, 2).clearContent();
     if (keep.length) it.getRange(2, IM_AUTO_ID_COL, keep.length, 2).setValues(keep);
     return changed;

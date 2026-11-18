@@ -97,6 +97,7 @@ function IM_installInterlinkMenu() {
 }
 
 function IM_onOpen_() {
+  try { ensureTopRows_(); } catch (e) { Logger.log('ensureTopRows_: ' + e.message); }   // the project-filter rows on Hardware List / Purchases / Production
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('🔗 Interlink')
     .addItem('➕ Add item to IMS',             'IM_addItemDialog')
