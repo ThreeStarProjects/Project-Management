@@ -48,7 +48,7 @@ function handleAutoIdGeneration_(e) {
 
 /**
  * When a Hardware List row's Status flips to "Out of Stock", push it into Purchases.
- * One-way. No re-push if already pushed (col L holds the PUR-code).
+ * One-way. No re-push if already pushed (col M holds the PUR-code).
  * For IMS items only the shortfall (Required − reserved/in stock) is pushed.
  * No sync of subsequent edits to Purchases (avoids clobbering procurement work).
  */
@@ -60,7 +60,7 @@ function handleHardwareListEdit_(e) {
 
   const startCol = range.getColumn();
   const numCols  = range.getNumColumns();
-  if (startCol > IM_HW_STATUS_COL || startCol + numCols - 1 < IM_HW_STATUS_COL) return;  // col J = Stock Status
+  if (startCol > IM_HW_STATUS_COL || startCol + numCols - 1 < IM_HW_STATUS_COL) return;  // col K = Stock Status
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const purSheet = ss.getSheetByName(SHEETS.PURCHASES);
@@ -79,13 +79,13 @@ function handleHardwareListEdit_(e) {
  */
 function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   const row = hwSheet.getRange(hwRow, 1, 1, IM_HW_RSV_COL).getValues()[0];
-  const [hwId, project, material, spec, qty, inStock, unit, /*reserve?*/, /*itemStatus*/, status, /*remarks*/, pushed, rsv] = row;
+  const [hwId, project, material, /*photo*/, spec, qty, inStock, unit, /*reserve?*/, /*itemStatus*/, status, /*remarks*/, pushed, rsv] = row;
   if (status !== 'Out of Stock') return null;
   if (pushed) return null;
   if (!hwId || !material) return null;
 
   // IMS items (In Stock col F is a number) push only the shortfall = Required − reserved qty
-  // (col M: "RSV-.. | reserved n" or "PMR-.. | pending | n"). Only RESERVED stock counts, so two
+  // (col N: "RSV-.. | reserved n" or "PMR-.. | pending | n"). Only RESERVED stock counts, so two
   // projects can't both rely on the same unreserved stock. If IMS has stock but nothing is
   // reserved, nothing is pushed until the row is reserved. With zero stock, the full qty is pushed.
   // Free-text materials (F = "n/a"/blank) and rows without a numeric Required Qty push as before.

@@ -10,13 +10,13 @@
  *                       shortfall (required − reserved) to Purchases
  *   no stock at all   → Status "Out of Stock", push the full qty
  *
- * Once a row has a reservation request (col M) or a Purchases link (col L) it is left
+ * Once a row has a reservation request (col N) or a Purchases link (col M) it is left
  * alone, so ticking again can never reserve or order the same thing twice. To redo a row,
  * clear M (and L) on purpose. A ⚠ in M (IMS error) is retried on the next tick.
  * A manual Status flip still goes through handleHardwareListEdit_ (Triggers.gs).
  *
  * Column map (Hardware List): A ID | B Project | C Material | D Spec | E Req Qty |
- *   F In Stock (IMS) | G Unit | H Reserve? | I Item Status | J Stock Status | K Remarks |
+ *   (D Photo | E Spec |) F Req Qty | G In Stock (IMS) | H Unit | I Reserve? | J Item Status | K Stock Status | L Remarks |
  *   L Pushed to Purchases | M IMS Reservation   (column constants: _Interlink_Items.gs)
  */
 
@@ -28,7 +28,7 @@ function IM_decideHardwareRow_(req, stock) {
 }
 
 // -----------------------------------------------------------------------------
-// Stock Status (col J) fills itself for rows that are not yet ticked / reserved / ordered:
+// Stock Status (col K) fills itself for rows that are not yet ticked / reserved / ordered:
 //   IMS item with Project, Material and Required Qty filled → "In Stock" if the free stock (col F =
 //   IMS Available, i.e. already net of every reservation) covers the Required Qty, else "Out of Stock".
 // It only ever writes the cell; nothing is reserved or ordered until Reserve? is ticked (script writes do
@@ -71,7 +71,7 @@ function IM_refreshStockStatus_(only) {
       if (r[IM_HW_RESERVE_COL - 1] === true || r[IM_HW_PUSHED_COL - 1] || r[IM_HW_RSV_COL - 1]) return;  // decided: hands off
       var owned = cur === '' || (mine[id] !== undefined && cur === mine[id]);  // blank, or still the script's own value
       if (!owned) return;                                                       // chosen by hand: respect it
-      var target = (r[1] && r[2]) ? IM_stockStatusFor_(Number(r[4]), r[5]) : '';
+      var target = (r[1] && r[2]) ? IM_stockStatusFor_(Number(r[IM_HW_QTY_COL - 1]), r[IM_HW_STOCK_COL - 1]) : '';
       if ((!want || want[i + f0]) && target && cur !== target) { r[IM_HW_STATUS_COL - 1] = target; cur = target; changed++; }
       if (cur !== '') keep.push([id, cur]);
     });
@@ -85,12 +85,14 @@ function IM_refreshStockStatus_(only) {
 }
 
 /**
- * Menu: bring the whole Hardware List up to date in one click: IMS Reservation (col M) from the IMS Register,
- * and Stock Status (col J) of the rows that are not ticked yet. Both also run by themselves when PM opens.
+ * Menu: bring the whole Hardware List up to date in one click: IMS Reservation (col N) from the IMS Register,
+ * and Stock Status (col K) of the rows that are not ticked yet. Both also run by themselves when PM opens.
  */
 function IM_refreshHardwareNow() {
   IM_refreshReservationStatus(true);
   var n = IM_refreshStockStatus_(null);
+  var ph = 0;
+  try { IM_syncPhotoSheets_(true); ph = IM_fillPhotos_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null, true); } catch (e) { Logger.log('Photos: ' + e.message); }   // pictures are refreshed from IMS here too
   SpreadsheetApp.getActive().toast('Reservations refreshed from IMS; ' + (n ? 'Stock Status updated on ' + n + ' row(s).' : 'Stock Status already up to date.'), '🔗 Interlink', 5);
 }
 
@@ -101,7 +103,7 @@ function IM_autoEvaluateHardwareRow_(sh, row) {
   try {
     SpreadsheetApp.flush();  // let the In Stock formula settle before reading it
     var v = sh.getRange(row, 1, 1, IM_HW_RSV_COL).getValues()[0];
-    var hwId = v[0], project = v[1], material = v[2], req = Number(v[4]), stock = v[5],
+    var hwId = v[0], project = v[1], material = v[2], req = Number(v[IM_HW_QTY_COL - 1]), stock = v[IM_HW_STOCK_COL - 1],
         pushed = v[IM_HW_PUSHED_COL - 1], k = String(v[IM_HW_RSV_COL - 1] || '');
 
     if (!hwId || !project || !material || !(req > 0)) return 'skipped: needs Project, Material and Required Qty';
@@ -150,21 +152,22 @@ function IM_verifyPurchasePush() {
     { name: 'IMS fully reserved (pending)', mat: 'Selftest IMS item', qty: 10, stock: 30,   rsv: 'PMR-test | pending | 10',  expect: null }
   ];
   var PUR_COLS = [1, 2, 3, 4, 5, 7, 8, 10, 14, 15];  // every Purchases cell the push writes
-  var HW_COLS  = [1, 2, 3, 4, 5, 7, IM_HW_STATUS_COL, IM_HW_PUSHED_COL, IM_HW_RSV_COL];  // everything but the F and I formulas
+  var HW_COLS  = [1, 2, 3, IM_HW_SPEC_COL, IM_HW_QTY_COL, IM_HW_UNIT_COL, IM_HW_STATUS_COL, IM_HW_PUSHED_COL, IM_HW_RSV_COL];  // everything but the formulas and the photo
   var lock = LockService.getDocumentLock();
   lock.waitLock(15000);
   var r = firstEmptyRow_(hw, 1);
   var reset = function () {
     HW_COLS.forEach(function (c) { hw.getRange(r, c).clearContent(); });
-    hw.getRange(r, IM_STOCK_COL).setFormula(IM_stockFormula_(r));
+    hw.getRange(r, IM_HW_STOCK_COL).setFormula(IM_stockFormula_(r));
   };
   try {
     cases.forEach(function (c) {
-      hw.getRange(r, 1, 1, 5).setValues([['HW-TEST', 'PRJ-TEST', c.mat, 'selftest spec', c.qty]]);
-      hw.getRange(r, 7).setValue('Pcs');
+      hw.getRange(r, 1, 1, 3).setValues([['HW-TEST', 'PRJ-TEST', c.mat]]);
+      hw.getRange(r, IM_HW_SPEC_COL, 1, 2).setValues([['selftest spec', c.qty]]);   // Specification, Required Qty
+      hw.getRange(r, IM_HW_UNIT_COL).setValue('Pcs');
       hw.getRange(r, IM_HW_STATUS_COL).setValue('Out of Stock');
       hw.getRange(r, IM_HW_PUSHED_COL, 1, 2).setValues([['', c.rsv]]);  // L Pushed, M IMS Reservation
-      if (c.stock !== null) hw.getRange(r, IM_STOCK_COL).setValue(c.stock);  // simulate an IMS item
+      if (c.stock !== null) hw.getRange(r, IM_HW_STOCK_COL).setValue(c.stock);  // simulate an IMS item
       SpreadsheetApp.flush();
 
       var prow = firstEmptyRow_(pur, 1);

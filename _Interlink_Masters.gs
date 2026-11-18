@@ -97,7 +97,8 @@ function IM_installInterlinkMenu() {
 }
 
 function IM_onOpen_() {
-  try { ensureTopRows_(); } catch (e) { Logger.log('ensureTopRows_: ' + e.message); }   // the project-filter rows on Hardware List / Purchases / Production
+  try { ensureTopRows_(); } catch (e) { Logger.log('ensureTopRows_: ' + e.message); }   // the project-filter rows on Hardware List / Purchases / Production, the Hardware Photo column
+  try { IM_syncPhotoSheets_(false); IM_fillPhotos_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null, false); } catch (e) { Logger.log('Photos: ' + e.message); }   // IMS pictures on Hardware List (at most every 6 hours)
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('🔗 Interlink')
     .addItem('➕ Add item to IMS',             'IM_addItemDialog')

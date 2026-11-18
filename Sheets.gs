@@ -94,7 +94,7 @@ function createMilestonesSheet_(ss) {
 }
 
 function createHardwareListSheet_(ss) {
-  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
+  try { CacheService.getScriptCache().remove(LAYOUT_CACHE_KEY); } catch (e) {}
   const sh = ss.insertSheet(SHEETS.HARDWARE);
   const headers = [
     'Hardware ID',          // A  auto HW-###
@@ -125,7 +125,7 @@ function createHardwareListSheet_(ss) {
 }
 
 function createPurchasesSheet_(ss) {
-  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
+  try { CacheService.getScriptCache().remove(LAYOUT_CACHE_KEY); } catch (e) {}
   const sh = ss.insertSheet(SHEETS.PURCHASES);
   const headers = [
     'Purchase ID',      // A  auto PUR-###
@@ -156,7 +156,7 @@ function createPurchasesSheet_(ss) {
 }
 
 function createProductionSheet_(ss) {
-  try { CacheService.getScriptCache().remove('top_rows_ok'); } catch (e) {}
+  try { CacheService.getScriptCache().remove(LAYOUT_CACHE_KEY); } catch (e) {}
   const sh = ss.insertSheet(SHEETS.PRODUCTION);
   const headers = [
     'Production ID',    // A  auto PROD-###
@@ -404,8 +404,8 @@ function installDataValidations() {
 
   // Hardware List
   if (proj) dd(SHEETS.HARDWARE, `B2:B${R}`, proj);
-  dd(SHEETS.HARDWARE, `G2:G${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
-  dd(SHEETS.HARDWARE, `J2:J${R}`, ['In Stock','Out of Stock']);
+  dd(SHEETS.HARDWARE, `H2:H${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);   // Unit (H: the Photo column sits at D)
+  dd(SHEETS.HARDWARE, `K2:K${R}`, ['In Stock','Out of Stock']);                                          // Stock Status (K)
 
   // Purchases (Invoice# + Amount removed; PO Issued now Y/N; Variance moved; Status now col M)
   if (proj) dd(SHEETS.PURCHASES, `B2:B${R}`, proj);
@@ -476,7 +476,7 @@ function installFormatting() {
   };
   base(SHEETS.PROJECTS,   17);
   base(SHEETS.MILESTONES, 27);
-  base(SHEETS.HARDWARE,   13);
+  base(SHEETS.HARDWARE,   14);
   base(SHEETS.PURCHASES,  15);
   base(SHEETS.PRODUCTION, 14);
   base(SHEETS.SNAGS,      13);
@@ -570,9 +570,9 @@ function applyAllCF_(ss) {
     ['No',  COLORS.BAD_BG,  COLORS.BAD_FG],
     ['Pending', COLORS.PENDING_BG, COLORS.PENDING_FG]
   ]));
-  // Hardware List: Stock Status (J)
+  // Hardware List: Stock Status (K)
   sh = ss.getSheetByName(SHEETS.HARDWARE);
-  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(shiftA1_(sh, `J2:J${R}`)), [
+  if (sh) sh.setConditionalFormatRules(cfRules_(sh.getRange(shiftA1_(sh, `K2:K${R}`)), [
     ['In Stock',     COLORS.DONE_BG, COLORS.DONE_FG],
     ['Out of Stock', COLORS.BAD_BG,  COLORS.BAD_FG]
   ]));
@@ -656,7 +656,7 @@ function applyAllCF_(ss) {
 function applyProjectColorBands_(ss) {
   const targets = [
     [SHEETS.MILESTONES, 'A', 'AA'],
-    [SHEETS.HARDWARE,   'B', 'M'],
+    [SHEETS.HARDWARE,   'B', 'N'],
     [SHEETS.PURCHASES,  'B', 'O'],  // O (15) after In Stock (IMS) was added
     [SHEETS.PRODUCTION, 'B', 'N'],
     [SHEETS.SNAGS,      'B', 'M'],
@@ -688,7 +688,7 @@ function applyProjectColorBands_(ss) {
 // visible so a new row can be typed. Typing in a new row while a project is picked fills its Project in.
 function ensureTopRows_() {
   const cache = CacheService.getScriptCache();
-  try { if (cache.get('top_rows_ok') === '1') return 0; } catch (e) {}
+  try { if (cache.get(LAYOUT_CACHE_KEY) === '1') return 0; } catch (e) {}
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   if (!ss) return 0;
   const lock = LockService.getDocumentLock();
@@ -703,10 +703,11 @@ function ensureTopRows_() {
         moved++;
       }
       if (String(sh.getRange(hdrRow_(sh), 1).getValue()).trim() !== FILTER_HEADERS[name]) { ready = false; return; }   // not a layout we know: leave it alone
+      if (name === SHEETS.HARDWARE) ensurePhotoColumn_(sh);   // Hardware List only: the IMS photo between Material and Specification
       setupProjectFilter_(sh);
     });
   } finally { try { lock.releaseLock(); } catch (e) {} }
-  if (ready) { try { cache.put('top_rows_ok', '1', 21600); } catch (e) {} }
+  if (ready) { try { cache.put(LAYOUT_CACHE_KEY, '1', 21600); } catch (e) {} }
   return moved;
 }
 
@@ -766,4 +767,18 @@ function handleProjectFilterEdit_(e) {
   if (!picked || picked === FILTER_ALL || range.getValue() === '') return;
   const p = sh.getRange(row, FILTER_PROJECT_COL);
   if (p.getValue() === '') p.setValue(picked);
+}
+
+/** Hardware List: insert the Photo column between Material (C) and Specification, once. Everything from Specification on moves one to the right. */
+function ensurePhotoColumn_(sh) {
+  const h = hdrRow_(sh);
+  if (String(sh.getRange(h, IM_HW_PHOTO_COL).getValue()).trim() === IM_PHOTO_HDR) return false;
+  if (String(sh.getRange(h, IM_HW_PHOTO_COL).getValue()).trim() !== 'Specification') return false;   // not the layout we know: leave it alone
+  sh.insertColumnAfter(IM_HW_PHOTO_COL - 1);   // native insert: formulas, dropdowns, checkboxes, colours move with their columns
+  sh.getRange(h, IM_HW_PHOTO_COL).setValue(IM_PHOTO_HDR)
+    .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG).setFontWeight('bold').setFontSize(11)
+    .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
+  sh.setColumnWidth(IM_HW_PHOTO_COL, IM_PHOTO_COL_PX);
+  sh.getRange(firstRow_(sh), IM_HW_PHOTO_COL, Math.max(sh.getMaxRows() - firstRow_(sh) + 1, 1), 1).setHorizontalAlignment('center').setVerticalAlignment('middle');
+  return true;
 }

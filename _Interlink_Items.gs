@@ -11,15 +11,15 @@
  * from the old F onward moves one column right. Hardware List also gets
  * H "Reserve?" (a checkbox: tick it to send the row's reservation to IMS) and
  * I "Item Status", a per-row formula over M (IMS Reservation) and L (Pushed to Purchases):
- *   Hardware List: A ID | B Project | C Material | D Spec | E Req Qty | F In Stock |
- *                  G Unit | H Reserve? | I Item Status | J Stock Status | K Remarks |
- *                  L Pushed to Purchases | M IMS Reservation
+ *   Hardware List: A ID | B Project | C Material | D Photo | E Spec | F Req Qty | G In Stock |
+ *                  H Unit | I Reserve? | J Item Status | K Stock Status | L Remarks |
+ *                  M Pushed to Purchases | N IMS Reservation
  *   Purchases:     A ID | B Project | C Material | D Spec | E Req Qty | F In Stock |
  *                  G Ordered | H Unit | I Vendor | J PO Issued | K Expected | L Actual |
  *                  M Variance | N Status | O Remarks
  * Picking an item in C fills Unit (G on Hardware, H on Purchases) if blank.
  *
- * Hardware List col J is "Stock Status" (In Stock / Out of Stock dropdown); col I is "Item Status".
+ * Hardware List col K is "Stock Status" (In Stock / Out of Stock dropdown); col J is "Item Status".
  *
  * Item Status (I) is a live per-row formula; no script has to run for it to change:
  *   Reservation: Not Reserved (IMS item, nothing reserved) / Reserving… / Reserved / Released /
@@ -44,22 +44,29 @@
 var IM_IMS_SHEET_ID = '1CglvPxUWZnIHNeToGEDz8-Xj3eNfvaF351j_ogpRTgk';
 var IM_ITEMS_SHEET  = '_IMS_Items';
 var IM_MAT_COL      = 3;   // C
-var IM_STOCK_COL    = 6;   // F
+var IM_STOCK_COL    = 6;   // F  (Purchases: In Stock (IMS); Hardware List has its own, see IM_HW_STOCK_COL)
+// Hardware List = A ID | B Project | C Material | D Photo | E Spec | F Req Qty | G In Stock | H Unit | I Reserve? | J Item Status |
+//                 K Stock Status | L Remarks | M Pushed to Purchases | N IMS Reservation    (Purchases keeps its own layout)
+var IM_HW_PHOTO_COL = 4;   // D
+var IM_HW_SPEC_COL  = 5;   // E
+var IM_HW_QTY_COL   = 6;   // F
+var IM_HW_STOCK_COL = 7;   // G
+var IM_HW_UNIT_COL  = 8;   // H
 var IM_STOCK_HDR    = 'In Stock (IMS)';
-var IM_HW_RESERVE_COL    = 8;    // H  checkbox: tick = send this row's reservation to IMS
-var IM_HW_ITEMSTATUS_COL = 9;    // I
-var IM_HW_STATUS_COL     = 10;   // J  Stock Status (In Stock / Out of Stock)
-var IM_HW_PUSHED_COL     = 12;   // L  Pushed to Purchases (PUR code)
-var IM_HW_RSV_COL        = 13;   // M  IMS Reservation text
+var IM_HW_RESERVE_COL    = 9;    // I  checkbox: tick = send this row's reservation to IMS
+var IM_HW_ITEMSTATUS_COL = 10;   // J
+var IM_HW_STATUS_COL     = 11;   // K  Stock Status (In Stock / Out of Stock)
+var IM_HW_PUSHED_COL     = 13;   // M  Pushed to Purchases (PUR code)
+var IM_HW_RSV_COL        = 14;   // N  IMS Reservation text
 var IM_RESERVE_HDR       = 'Reserve?';
 var IM_ITEMSTATUS_HDR    = 'Item Status';
-var IM_STOCKSTATUS_HDR   = 'Stock Status';   // Hardware List col J (was "Status")
+var IM_STOCKSTATUS_HDR   = 'Stock Status';   // Hardware List col K (was "Status")
 
 /** Sheets that carry the Material dropdown + In Stock column, and where their Unit lives. */
 function IM_itemSheets_() {
   return [
-    { name: SHEETS.HARDWARE,  unitCol: 7 },
-    { name: SHEETS.PURCHASES, unitCol: 8 }
+    { name: SHEETS.HARDWARE,  unitCol: IM_HW_UNIT_COL, stockCol: IM_HW_STOCK_COL, specCol: IM_HW_SPEC_COL },
+    { name: SHEETS.PURCHASES, unitCol: 8,              stockCol: IM_STOCK_COL,    specCol: 4 }
   ];
 }
 
@@ -95,21 +102,21 @@ function IM_installItems() {
 
   targets.forEach(function (t) {
     var sh = ss.getSheetByName(t.name);
-    if (sh.getRange(hdrRow_(sh), IM_STOCK_COL).getValue() !== IM_STOCK_HDR) {
+    if (sh.getRange(hdrRow_(sh), t.stockCol).getValue() !== IM_STOCK_HDR) {
       // earlier Phase 3 attempt put Item Code / In Stock in J:K of Hardware List
       if (t.name === SHEETS.HARDWARE && sh.getRange(hdrRow_(sh), 10).getValue() === 'Item Code (IMS)') sh.deleteColumns(10, 2);
-      sh.insertColumnAfter(IM_STOCK_COL - 1);  // new F; native insert shifts formulas/validations/CF
+      sh.insertColumnAfter(t.stockCol - 1);  // new In Stock column; native insert shifts formulas/validations/CF
     }
-    sh.getRange(hdrRow_(sh), IM_STOCK_COL).setValue(IM_STOCK_HDR)
+    sh.getRange(hdrRow_(sh), t.stockCol).setValue(IM_STOCK_HDR)
       .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG)
       .setFontWeight('bold').setFontSize(11)
       .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
-    sh.setColumnWidth(IM_STOCK_COL, 110);
+    sh.setColumnWidth(t.stockCol, 110);
 
     // F: one plain formula per row (survives row deletes and the Purchases import)
     var f = [], f0 = firstRow_(sh), nr = Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1);
     for (var r = f0; r < f0 + nr; r++) f.push([IM_stockFormula_(r)]);
-    sh.getRange(f0, IM_STOCK_COL, nr, 1).setFormulas(f).setHorizontalAlignment('center');
+    sh.getRange(f0, t.stockCol, nr, 1).setFormulas(f).setHorizontalAlignment('center');
     sh.getRange(f0, IM_MAT_COL, nr, 1).setDataValidation(rule);
   });
 
@@ -150,7 +157,7 @@ function IM_writeStatusImports_(it) {
 }
 
 /**
- * Hardware List "Item Status" (col I) for one row, from M (IMS Reservation text), L (PUR code) and F (stock).
+ * Hardware List "Item Status" (col J) for one row, from N (IMS Reservation text), M (PUR code) and G (stock).
  * Reservation part, live from IMS via the helper sheet (falls back to M's text if IMS has no row for it):
  *   Consumed / Partially Consumed / Released / Reserved (Register status) · ⚠ Reservation error ·
  *   Reserving… (request still pending) · Not Reserved (IMS item with no reservation yet) · blank for
@@ -161,7 +168,7 @@ function IM_writeStatusImports_(it) {
  */
 function IM_itemStatusFormula_(r) {
   var I = IM_ITEMS_SHEET, P = SHEETS.PURCHASES;
-  return '=LET(resvRaw,$M' + r + ',purch,$L' + r + ',isIms,ISNUMBER($F' + r + '),' +
+  return '=LET(resvRaw,$N' + r + ',purch,$M' + r + ',isIms,ISNUMBER($G' + r + '),' +
     'reqId,IFERROR(REGEXEXTRACT(resvRaw,"^PMR-\\w+"),""),' +
     'rsvNo,IFERROR(REGEXEXTRACT(resvRaw,"^RSV-\\d+"),IF(reqId="","",IFERROR(VLOOKUP(reqId,' + I + '!$K:$M,2,FALSE),""))),' +
     'qStat,IF(reqId="","",IFERROR(VLOOKUP(reqId,' + I + '!$K:$M,3,FALSE),"")),' +
@@ -181,8 +188,8 @@ function IM_itemStatusFormula_(r) {
 }
 
 /**
- * Hardware List: (re)write the IMS imports and the per-row Item Status formulas (col I). Idempotent.
- * Needs the current layout (G Unit | H Reserve? | I Item Status). A sheet from before the checkbox
+ * Hardware List: (re)write the IMS imports and the per-row Item Status formulas (col J). Idempotent.
+ * Needs the current layout (H Unit | I Reserve? | J Item Status). A sheet from before the checkbox
  * column goes through IM_installReserveCheckbox() first.
  */
 function IM_installItemStatus() {
@@ -191,7 +198,7 @@ function IM_installItemStatus() {
   if (!hw) { IM_say_('Hardware List sheet not found.'); return; }
   if (!it) { IM_say_('Run IM_installItems() first (the hidden ' + IM_ITEMS_SHEET + ' sheet is missing).'); return; }
   if (hw.getRange(hdrRow_(hw), IM_HW_RESERVE_COL).getValue() !== IM_RESERVE_HDR) {
-    IM_say_('Hardware List has no "' + IM_RESERVE_HDR + '" column in H yet. Run IM_installReserveCheckbox() instead; nothing changed.');
+    IM_say_('Hardware List has no "' + IM_RESERVE_HDR + '" column in I yet. Run IM_installReserveCheckbox() instead; nothing changed.');
     return;
   }
   IM_writeStatusImports_(it);
@@ -226,11 +233,11 @@ function IM_installReserveCheckbox() {
   var hw = ss.getSheetByName(SHEETS.HARDWARE), it = ss.getSheetByName(IM_ITEMS_SHEET);
   if (!hw || !it) { IM_say_('Hardware List or the hidden ' + IM_ITEMS_SHEET + ' sheet is missing.'); return; }
   if (hw.getRange(hdrRow_(hw), IM_HW_RESERVE_COL).getValue() !== IM_RESERVE_HDR) {
-    if (hw.getRange(hdrRow_(hw), 7).getValue() !== 'Unit' || hw.getRange(hdrRow_(hw), 8).getValue() !== IM_ITEMSTATUS_HDR) {
+    if (hw.getRange(hdrRow_(hw), IM_HW_UNIT_COL).getValue() !== 'Unit' || hw.getRange(hdrRow_(hw), IM_HW_UNIT_COL + 1).getValue() !== IM_ITEMSTATUS_HDR) {
       IM_say_('Expected "Unit" in G and "Item Status" in H of Hardware List; nothing changed.');
       return;
     }
-    hw.insertColumnAfter(7);  // new H
+    hw.insertColumnAfter(IM_HW_UNIT_COL);  // new Reserve? column
   }
   hw.getRange(firstRow_(hw), IM_HW_RESERVE_COL, Math.min(MAX_ROWS - 1, hw.getMaxRows() - firstRow_(hw) + 1), 1).clearDataValidations().insertCheckboxes().setHorizontalAlignment('center');
   IM_styleHwHeader_(hw, IM_HW_RESERVE_COL, IM_RESERVE_HDR, 80);
@@ -284,9 +291,9 @@ function IM_onHardwareItemEdit_(e) {
     var t = IM_itemSheets_().filter(function (x) { return x.name === sh.getName(); })[0];
     if (!t || r.getRow() < firstRow_(sh) || r.getNumRows() !== 1 || r.getNumColumns() !== 1) return;
     var col = r.getColumn();
-    if (col === IM_MAT_COL) { IM_fillUnit_(e, sh, t, r); IM_fillSpec_(sh, [r.getRow()]); }
+    if (col === IM_MAT_COL) { IM_fillUnit_(e, sh, t, r); IM_fillSpec_(sh, [r.getRow()]); if (t.name === SHEETS.HARDWARE) IM_fillPhotos_(sh, [r.getRow()], true); }
     if (t.name === SHEETS.HARDWARE && col === IM_HW_RESERVE_COL && r.getValue() === true) IM_onReserveTicked_(e, sh, r.getRow());
-    if (t.name === SHEETS.HARDWARE && (col === 2 || col === IM_MAT_COL || col === 5)) IM_refreshStockStatus_([r.getRow()]);  // Stock Status fills itself
+    if (t.name === SHEETS.HARDWARE && (col === 2 || col === IM_MAT_COL || col === IM_HW_QTY_COL)) IM_refreshStockStatus_([r.getRow()]);  // Stock Status fills itself
   } catch (err) {
     Logger.log('IM_onHardwareItemEdit_ error: ' + err.message);
   }
@@ -333,7 +340,9 @@ function IM_fillSpec_(sh, rows) {
     if (!Object.keys(descOf).length) return 0;            // descriptions not loaded yet: touch nothing
     var f0 = firstRow_(sh), n = sh.getLastRow() - f0 + 1; if (n < 1) return 0;
     var all = !rows, first = all ? f0 : Math.min.apply(null, rows), cnt = all ? n : Math.max.apply(null, rows) - first + 1;
-    var vals = sh.getRange(first, IM_MAT_COL, cnt, 2).getValues(), want = {}, changed = 0;   // C Material, D Specification
+    var specCol = sh.getName() === SHEETS.HARDWARE ? IM_HW_SPEC_COL : 4;
+    var mats = sh.getRange(first, IM_MAT_COL, cnt, 1).getValues(), specs = sh.getRange(first, specCol, cnt, 1).getValues(), want = {}, changed = 0;
+    var vals = mats.map(function (m, i) { return [m[0], specs[i][0]]; });   // Material, Specification
     (all ? vals.map(function (_, i) { return first + i; }) : rows).forEach(function (r) { want[r] = true; });
     vals.forEach(function (v, i) {
       if (!want[first + i]) return;
@@ -341,7 +350,7 @@ function IM_fillSpec_(sh, rows) {
       if (cur !== '' && !isDesc[cur]) return;             // typed by hand: leave it
       if (all && v[0] === '') return;                     // whole-sheet pass never clears anything on empty rows
       if (cur === d) return;
-      sh.getRange(first + i, IM_MAT_COL + 1).setValue(d); changed++;
+      sh.getRange(first + i, specCol).setValue(d); changed++;
     });
     return changed;
   } catch (err) { Logger.log('IM_fillSpec_ error: ' + err.message); return 0; }
@@ -392,8 +401,9 @@ function IM_verifyWiring() {
   };
 
   var H = SHEETS.HARDWARE, P = SHEETS.PURCHASES;
-  [[H, 5, 'Required Qty'], [H, 6, IM_STOCK_HDR], [H, 7, 'Unit'], [H, 8, IM_RESERVE_HDR], [H, 9, IM_ITEMSTATUS_HDR], [H, 10, IM_STOCKSTATUS_HDR],
-   [H, 12, 'Pushed to Purchases'], [H, 13, 'IMS Reservation'],
+  [[H, IM_HW_PHOTO_COL, IM_PHOTO_HDR], [H, IM_HW_SPEC_COL, 'Specification'], [H, IM_HW_QTY_COL, 'Required Qty'], [H, IM_HW_STOCK_COL, IM_STOCK_HDR], [H, IM_HW_UNIT_COL, 'Unit'],
+   [H, IM_HW_RESERVE_COL, IM_RESERVE_HDR], [H, IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR], [H, IM_HW_STATUS_COL, IM_STOCKSTATUS_HDR],
+   [H, IM_HW_PUSHED_COL, 'Pushed to Purchases'], [H, IM_HW_RSV_COL, 'IMS Reservation'],
    [P, 5, 'Required Qty'], [P, 6, IM_STOCK_HDR], [P, 7, 'Ordered Qty'], [P, 8, 'Unit'], [P, 9, 'Vendor'],
    [P, 10, 'PO Issued'], [P, 11, 'Expected Delivery'], [P, 12, 'Actual Delivery'], [P, 13, 'Variance (Days)'],
    [P, 14, 'Status'], [P, 15, 'Remarks']
@@ -404,13 +414,13 @@ function IM_verifyWiring() {
   check('Purchases variance (col M) = L − K', /L\d+:L-K\d+:K/.test(mf) && /K\d+:K=""/.test(mf));
 
   var hwSheet = ss.getSheetByName(H);
-  var iF = hwSheet ? hwSheet.getRange(shiftA1_(hwSheet, 'I2')).getFormula() : '';
-  check('Hardware Item Status formula (col I) reads L and M', !!hwSheet && /\$M\d+/.test(iF) && /\$L\d+/.test(iF));
-  var cbDv = hwSheet && hwSheet.getRange(shiftA1_(hwSheet, 'H2')).getDataValidation();
-  check('Hardware H (Reserve?) is a checkbox', !!cbDv && cbDv.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX);
-  check('Hardware J (Stock Status) dropdown', dvHas(H, 'J2', 'Out of Stock'));
-  check('Hardware G (Unit) dropdown',   dvHas(H, 'G2', 'Pcs'));
-  check('Hardware I (Item Status) has no dropdown', !!hwSheet && !hwSheet.getRange(shiftA1_(hwSheet, 'I2')).getDataValidation());
+  var iF = hwSheet ? hwSheet.getRange(shiftA1_(hwSheet, 'J2')).getFormula() : '';
+  check('Hardware Item Status formula (col J) reads M and N', !!hwSheet && /\$N\d+/.test(iF) && /\$M\d+/.test(iF));
+  var cbDv = hwSheet && hwSheet.getRange(shiftA1_(hwSheet, 'I2')).getDataValidation();
+  check('Hardware I (Reserve?) is a checkbox', !!cbDv && cbDv.getCriteriaType() === SpreadsheetApp.DataValidationCriteria.CHECKBOX);
+  check('Hardware K (Stock Status) dropdown', dvHas(H, 'K2', 'Out of Stock'));
+  check('Hardware H (Unit) dropdown',   dvHas(H, 'H2', 'Pcs'));
+  check('Hardware J (Item Status) has no dropdown', !!hwSheet && !hwSheet.getRange(shiftA1_(hwSheet, 'J2')).getDataValidation());
   check('Purchases N (Status) dropdown', dvHas(P, 'N2', 'Delivered'));
   check('Purchases J (PO Issued) dropdown', dvHas(P, 'J2', 'Yes'));
   check('Purchases H (Unit) dropdown',   dvHas(P, 'H2', 'Pcs'));
@@ -438,7 +448,7 @@ function IM_verifyWiring() {
 }
 
 // -----------------------------------------------------------------------------
-// Live check of the Item Status formula (Hardware List col I). Uses the first empty
+// Live check of the Item Status formula (Hardware List col J). Uses the first empty
 // Hardware row and first empty Purchases row as scratch, then clears what it wrote.
 // -----------------------------------------------------------------------------
 function IM_verifyItemStatus() {
@@ -473,12 +483,12 @@ function IM_verifyItemStatus() {
   var hr = firstEmptyRow_(hw, 1), pr = firstEmptyRow_(pur, 1);
   var reset = function () {
     hw.getRange(hr, IM_HW_PUSHED_COL, 1, 2).clearContent();   // L, M
-    hw.getRange(hr, IM_STOCK_COL).setFormula(IM_stockFormula_(hr));
+    hw.getRange(hr, IM_HW_STOCK_COL).setFormula(IM_stockFormula_(hr));
     pur.getRange(pr, 1).clearContent(); pur.getRange(pr, 14).clearContent();  // A ID, N Status
   };
   try {
     cases.forEach(function (c) {
-      hw.getRange(hr, IM_STOCK_COL).setValue(c[0]);           // simulate an IMS item / a free-text one
+      hw.getRange(hr, IM_HW_STOCK_COL).setValue(c[0]);        // simulate an IMS item / a free-text one
       hw.getRange(hr, IM_HW_PUSHED_COL, 1, 2).setValues([[c[2], c[1]]]);
       pur.getRange(pr, 1).setValue(c[2] ? 'PUR-TEST' : '');
       pur.getRange(pr, 14).setValue(c[3]);
@@ -633,7 +643,7 @@ function ST_hardware_(st) {
   var add = function (material, qty) {
     var r = firstEmptyRow_(hw, 1), id = 'HW-' + ST_pad_(getMaxIdNumber_(hw, 'HW') + 1);
     hw.getRange(r, 1).setValue(id); hw.getRange(r, 2).setValue(st.label); hw.getRange(r, 3).setValue(material);
-    hw.getRange(r, 5).setValue(qty); hw.getRange(r, 7).setValue('Pcs'); hw.getRange(r, IM_HW_RESERVE_COL).setValue(false);
+    hw.getRange(r, IM_HW_QTY_COL).setValue(qty); hw.getRange(r, IM_HW_UNIT_COL).setValue('Pcs'); hw.getRange(r, IM_HW_RESERVE_COL).setValue(false);
     return { row: r, id: id };
   };
   if (st.x) st.a = add(st.x.label, 2);
@@ -644,7 +654,7 @@ function ST_hardware_(st) {
   var rows = [st.a, st.b, st.c].filter(Boolean).map(function (x) { return x.row; });
   IM_refreshStockStatus_(rows);
   SpreadsheetApp.flush();
-  var f = function (o) { return hw.getRange(o.row, IM_STOCK_COL).getValue(); };
+  var f = function (o) { return hw.getRange(o.row, IM_HW_STOCK_COL).getValue(); };
   var j = function (o) { return hw.getRange(o.row, IM_HW_STATUS_COL).getValue(); };
   if (st.a) {
     ST_chk_(A, 'In Stock (IMS) column shows a number for an IMS item', typeof f(st.a) === 'number', 'F = ' + f(st.a));
@@ -1244,7 +1254,7 @@ function IM_needsAttentionNow(quiet) {
     hw.getRange(firstRow_(hw), 1, hw.getLastRow() - firstRow_(hw) + 1, IM_HW_RSV_COL).getValues().forEach(function (r, i) {
       var id = r[0], row = i + firstRow_(hw);
       if (!id || !r[1] || !r[2]) return;
-      var ticked = r[IM_HW_RESERVE_COL - 1] === true, pushed = r[IM_HW_PUSHED_COL - 1], m = String(r[IM_HW_RSV_COL - 1] || ''), st = r[IM_HW_STATUS_COL - 1], f = r[IM_STOCK_COL - 1];
+      var ticked = r[IM_HW_RESERVE_COL - 1] === true, pushed = r[IM_HW_PUSHED_COL - 1], m = String(r[IM_HW_RSV_COL - 1] || ''), st = r[IM_HW_STATUS_COL - 1], f = r[IM_HW_STOCK_COL - 1];
       if (m.charAt(0) === '⚠') errs.push({ id: id, row: row, why: m.replace(/^⚠\s*/, '') });
       else if (!ticked && !pushed && !m) {
         if (f === 'n/a') free.push({ id: id, row: row, name: r[2] });
@@ -1333,7 +1343,8 @@ function IM_installHelpNotes_() {
   var hw = SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE);
   if (!hw) return 0;
   var notes = [
-    [IM_STOCK_COL, IM_STOCK_HDR, 'Free stock in IMS: what is in stock minus what is already reserved. "n/a" means this material is not an IMS item. Automatic: do not type here.'],
+    [IM_HW_PHOTO_COL, IM_PHOTO_HDR, 'The item\'s picture from IMS (copied in by itself when you pick the Material; blank if the item has no picture in IMS or is free text).'],
+    [IM_HW_STOCK_COL, IM_STOCK_HDR, 'Free stock in IMS: what is in stock minus what is already reserved. "n/a" means this material is not an IMS item. Automatic: do not type here.'],
     [IM_HW_RESERVE_COL, IM_RESERVE_HDR, 'Tick to reserve this row in IMS. What exists is reserved; anything missing goes to Purchases. IMS confirms within about a minute. Ticking again does nothing.'],
     [IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR, 'Where this item is now: Not Reserved, Reserving…, Reserved, Partially Consumed, Consumed, Released, plus To order / Ordered / Delivered from Purchases. Automatic. A ⚠ means IMS refused: the reason is in this cell\'s note.'],
     [IM_HW_STATUS_COL, IM_STOCKSTATUS_HDR, 'In Stock or Out of Stock. Fills itself from IMS until you tick Reserve?. You can still choose by hand; setting Out of Stock sends the row to Purchases.'],
@@ -1358,7 +1369,7 @@ function IM_healFormulaColumns_() {
     f.forEach(function (r, i) { if (!r[0] || String(r[0]).charAt(0) !== '=') { out.push([make(i + f0)]); changed = true; fixed++; } else out.push([r[0]]); });
     if (changed) sh.getRange(f0, col, nr, 1).setFormulas(out);
   };
-  heal(ss.getSheetByName(SHEETS.HARDWARE), IM_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
+  heal(ss.getSheetByName(SHEETS.HARDWARE), IM_HW_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
   heal(ss.getSheetByName(SHEETS.HARDWARE), IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR, IM_itemStatusFormula_);
   heal(ss.getSheetByName(SHEETS.PURCHASES), IM_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
   return fixed;
@@ -1398,4 +1409,73 @@ function IM_showStartHere() {
     });
   }
   ss.setActiveSheet(sh);
+}
+
+// ---------------------------------------------------------------- item photos (Hardware List, col D)
+// IMS keeps its item pictures INSIDE the cells of Item Master / SFG Master (col B). They cannot be imported with a formula, so PM keeps its own
+// copy of those two columns on hidden sheets (_IMS_Photos, _IMS_PhotosSFG: a copy of the IMS sheets cut down to A:B, which keeps the pictures),
+// refreshed at most every 6 hours (or from 🔗 Interlink → Refresh Hardware List). A Hardware row whose Material is an IMS item gets that
+// item's picture copied into its Photo cell; the row is made taller so the picture is visible. No picture in IMS / a free-text material = blank.
+var IM_PHOTO_HDR = 'Photo (IMS)';
+var IM_PHOTO_SHEETS = [['Item Master', '_IMS_Photos'], ['SFG Master', '_IMS_PhotosSFG']];
+var IM_PHOTO_ROW_PX = 64;     // height of a Hardware row that shows a picture
+var IM_PHOTO_COL_PX = 90;
+
+/** Copies the picture columns of IMS Item Master + SFG Master into PM (hidden). force = ignore the 6-hour rule. Returns true if it copied. */
+function IM_syncPhotoSheets_(force) {
+  var ss = SpreadsheetApp.getActive(), props = PropertiesService.getScriptProperties();
+  var at = Number(props.getProperty('IM_PHOTOS_AT')) || 0, have = IM_PHOTO_SHEETS.every(function (p) { return !!ss.getSheetByName(p[1]); });
+  if (!force && have && Date.now() - at < 6 * 3600 * 1000) return false;
+  var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), done = 0;
+  IM_PHOTO_SHEETS.forEach(function (p) {
+    var src = ims.getSheetByName(p[0]); if (!src) return;
+    var copy = src.copyTo(ss).setName(p[1] + '_new');                       // copy first, swap only if it worked
+    if (copy.getMaxColumns() > 2) copy.deleteColumns(3, copy.getMaxColumns() - 2);   // keep Code (A) + Photo (B); the rest were formulas on IMS sheets
+    var last = copy.getLastRow(); if (last >= 1) { var codes = copy.getRange(1, 1, last, 1); codes.setValues(codes.getValues()); }   // codes as plain values (they may be formulas on the IMS sheet)
+    var old = ss.getSheetByName(p[1]); if (old) ss.deleteSheet(old);
+    copy.setName(p[1]); copy.hideSheet(); done++;
+  });
+  if (done) props.setProperty('IM_PHOTOS_AT', String(Date.now()));
+  return done > 0;
+}
+
+/** code → { sheet, row } for every item that has a picture in the PM copy. */
+function IM_photoIndex_() {
+  var ss = SpreadsheetApp.getActive(), idx = {};
+  IM_PHOTO_SHEETS.forEach(function (p) {
+    var sh = ss.getSheetByName(p[1]); if (!sh || sh.getLastRow() < 2) return;
+    var v = sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues();
+    v.forEach(function (r, i) { if (r[0] && r[1] && typeof r[1] === 'object' && !idx[r[0]]) idx[r[0]] = { sheet: sh, row: i + 2 }; });
+  });
+  return idx;
+}
+
+/**
+ * Put each Hardware row's item picture into its Photo cell. rows = null (every row with a Material) or [row numbers].
+ * replace = true re-copies even where a picture is already there (a Material that was just changed); false only fills rows that have none.
+ * Returns how many Photo cells were changed.
+ */
+function IM_fillPhotos_(sh, rows, replace) {
+  try {
+    var ss = SpreadsheetApp.getActive(), it = ss.getSheetByName(IM_ITEMS_SHEET);
+    if (!sh || !it || String(sh.getRange(hdrRow_(sh), IM_HW_PHOTO_COL).getValue()) !== IM_PHOTO_HDR) return 0;   // no Photo column (yet)
+    var f0 = firstRow_(sh), last = sh.getLastRow(); if (last < f0) return 0;
+    var first = rows ? Math.min.apply(null, rows) : f0, end = rows ? Math.max.apply(null, rows) : last, cnt = end - first + 1;
+    var codeOf = {}; if (it.getLastRow() >= 2) it.getRange(2, 1, it.getLastRow() - 1, 2).getValues().forEach(function (x) { if (x[1] !== '') codeOf[x[1]] = x[0]; });
+    var idx = IM_photoIndex_();
+    var mats = sh.getRange(first, IM_MAT_COL, cnt, 1).getValues(), cur = sh.getRange(first, IM_HW_PHOTO_COL, cnt, 1).getValues(), changed = 0;
+    var want = {}; if (rows) rows.forEach(function (r) { want[r] = true; });
+    mats.forEach(function (m, i) {
+      var row = first + i; if (rows && !want[row]) return;
+      var code = codeOf[m[0]], loc = code !== undefined ? idx[code] : null, has = cur[i][0] !== '' && cur[i][0] !== null;
+      if (loc) {
+        if (has && !replace) return;
+        loc.sheet.getRange(loc.row, 2).copyTo(sh.getRange(row, IM_HW_PHOTO_COL));
+        sh.setRowHeight(row, IM_PHOTO_ROW_PX); changed++;
+      } else if (has && (replace || m[0] === '')) {                    // no picture for this material any more: clear it and give the row its normal height back
+        sh.getRange(row, IM_HW_PHOTO_COL).clearContent(); sh.setRowHeight(row, 21); changed++;
+      }
+    });
+    return changed;
+  } catch (err) { Logger.log('IM_fillPhotos_ error: ' + err.message); return 0; }
 }

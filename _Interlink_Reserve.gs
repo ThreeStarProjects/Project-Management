@@ -3,7 +3,7 @@
  * -----------------------------------------------------------------------------
  * PM → IMS reservations through IMS's own 'Reservation Register' (one sheet for all reservations).
  * PM appends a row with Status "Requested" and a Request ID; IMS's 1-minute trigger turns it into
- * an Active reservation (Reservation No assigned) or an "Error" row. Hardware List col M shows the
+ * an Active reservation (Reservation No assigned) or an "Error" row. Hardware List col N shows the
  * outcome:
  *
  *   M  IMS Reservation:  "PMR-xxxx | pending | 5"  →  "RSV-0012 | reserved 5"
@@ -35,7 +35,7 @@ function IM_installReserve() {
     .setFontWeight('bold').setFontSize(11)
     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
   hw.setColumnWidth(IM_HW_RSV_COL, 200);
-  IM_sayR_('Hardware List col M ready.');
+  IM_sayR_('Hardware List col N ready.');
 }
 
 function IM_sayR_(msg) {
@@ -78,7 +78,7 @@ function IM_queueReservations_(items) {
 }
 
 /**
- * Bring Hardware List col M up to date from IMS (read-only):
+ * Bring Hardware List col N up to date from IMS (read-only):
  *   "PMR-x | pending | n"  →  "RSV-0012 | reserved n"   (request processed), or "⚠ reason"
  *   "RSV-0012 | reserved n" follows the Reservation Register: reserved / partially consumed / released / consumed.
  * Runs on sheet open and from the 🔗 Interlink menu.
@@ -94,7 +94,7 @@ function IM_refreshReservationStatus(quiet) {  // quiet = from onOpen: no toast 
     if (r[15]) byId[r[15]] = r;
     if (r[1]) state[r[1]] = r;
   });
-  // Register row → word used in col M. A released reservation that was partly consumed first reads "partially consumed".
+  // Register row → word used in col N. A released reservation that was partly consumed first reads "partially consumed".
   var word = function (r) {
     var s = r[8], used = Number(r[14]) || 0;
     if (s === 'Active') return 'reserved';

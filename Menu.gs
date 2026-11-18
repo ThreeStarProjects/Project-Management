@@ -264,7 +264,7 @@ function rebuildOneSheet_(name, createFn, formatFn) {
 /**
  * One-shot backfill: create a Hardware List row for every existing Purchases row.
  * Each backfilled row is marked Out of Stock and col K (Pushed) is stamped with the
- * PUR-code so the onEdit trigger will NOT create a duplicate Purchase later.
+ * PUR-code so the onEdit trigger will NOT create a duplicate Purchase later. (Hardware layout: see _Interlink_Items.gs.)
  */
 function importPurchasesIntoHardwareList() {
   const ui = SpreadsheetApp.getUi();
@@ -312,10 +312,11 @@ function importPurchasesIntoHardwareList() {
   if (confirm !== ui.Button.YES) return;
 
   const startRow = firstEmptyRow_(hwSheet, 1);
-  // F (In Stock) and I (Item Status) are formula columns, H is the Reserve? checkbox — write A:E, G and J:L around them.
-  hwSheet.getRange(startRow, 1, toInsert.length, 5).setValues(toInsert.map(r => r.slice(0, 5)));
-  hwSheet.getRange(startRow, 7, toInsert.length, 1).setValues(toInsert.map(r => r.slice(5, 6)));
-  hwSheet.getRange(startRow, IM_HW_STATUS_COL, toInsert.length, 3).setValues(toInsert.map(r => r.slice(6)));
+  // Photo (D), In Stock (G) and Item Status (J) are filled by themselves and I is the Reserve? checkbox: write around them.
+  hwSheet.getRange(startRow, 1, toInsert.length, 3).setValues(toInsert.map(r => r.slice(0, 3)));                 // ID, Project, Material
+  hwSheet.getRange(startRow, IM_HW_SPEC_COL, toInsert.length, 2).setValues(toInsert.map(r => r.slice(3, 5)));   // Specification, Required Qty
+  hwSheet.getRange(startRow, IM_HW_UNIT_COL, toInsert.length, 1).setValues(toInsert.map(r => r.slice(5, 6)));   // Unit
+  hwSheet.getRange(startRow, IM_HW_STATUS_COL, toInsert.length, 3).setValues(toInsert.map(r => r.slice(6)));    // Stock Status, Remarks, Pushed
   ui.alert('✅ Imported ' + toInsert.length + ' row(s). Skipped: ' + skipped + '.');
 }
 
