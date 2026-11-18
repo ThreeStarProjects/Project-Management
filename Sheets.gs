@@ -721,13 +721,16 @@ function setupProjectFilter_(sh) {
     list.getRange('A2').setFormula('=IFERROR(FILTER(PROJECT_LABELS,PROJECT_LABELS<>""),"")');
     list.hideSheet();
   }
+  // The two rows were inserted above the header and took ITS look (dark blue, white text, and a dropdown copied from the cell beside).
+  // Rows 1-2 are plain white; only the label and the dropdown are styled below.
+  sh.getRange(1, 1, TOP_ROWS, Math.max(sh.getLastColumn(), FILTER_CELL_COL + 1)).clearDataValidations().setBackground('#FFFFFF').setFontColor('#000000').setFontWeight('normal');
   const lab = sh.getRange(1, FILTER_LABEL_COL, TOP_ROWS, 1), cell = sh.getRange(1, FILTER_CELL_COL, TOP_ROWS, 1);
   if (!lab.isPartOfMerge()) lab.merge();
   if (!cell.isPartOfMerge()) cell.merge();
   lab.setValue('Project filter ▶').setFontWeight('bold').setFontColor('#1F3864').setHorizontalAlignment('right').setVerticalAlignment('middle').setBackground('#EAF1FB');
   const cur = String(sh.getRange(1, FILTER_CELL_COL).getValue()).trim();
   cell.setDataValidation(SpreadsheetApp.newDataValidation().requireValueInRange(list.getRange('A1:A500'), true).setAllowInvalid(false).build())
-      .setFontWeight('bold').setFontSize(11).setHorizontalAlignment('center').setVerticalAlignment('middle').setBackground('#FFF2CC')
+      .setFontWeight('bold').setFontSize(11).setFontColor('#000000').setHorizontalAlignment('center').setVerticalAlignment('middle').setBackground('#FFF2CC')
       .setBorder(true, true, true, true, null, null, '#BF9000', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
   if (!cur) sh.getRange(1, FILTER_CELL_COL).setValue(FILTER_ALL);
   sh.getRange(1, FILTER_CELL_COL).setNote('Pick a project to show only its rows. "All projects" shows everything. Rows with no project stay visible so you can add one.');
@@ -771,14 +774,22 @@ function handleProjectFilterEdit_(e) {
 
 /** Hardware List: insert the Photo column between Material (C) and Specification, once. Everything from Specification on moves one to the right. */
 function ensurePhotoColumn_(sh) {
-  const h = hdrRow_(sh);
-  if (String(sh.getRange(h, IM_HW_PHOTO_COL).getValue()).trim() === IM_PHOTO_HDR) return false;
-  if (String(sh.getRange(h, IM_HW_PHOTO_COL).getValue()).trim() !== 'Specification') return false;   // not the layout we know: leave it alone
+  const h = hdrRow_(sh), cur = String(sh.getRange(h, IM_HW_PHOTO_COL).getValue()).trim();
+  if (cur === IM_PHOTO_HDR) { cleanPhotoColumn_(sh); return false; }
+  if (cur !== 'Specification') return false;   // not the layout we know: leave it alone
   sh.insertColumnAfter(IM_HW_PHOTO_COL - 1);   // native insert: formulas, dropdowns, checkboxes, colours move with their columns
   sh.getRange(h, IM_HW_PHOTO_COL).setValue(IM_PHOTO_HDR)
     .setBackground(COLORS.HEADER_BG).setFontColor(COLORS.HEADER_FG).setFontWeight('bold').setFontSize(11)
     .setHorizontalAlignment('center').setVerticalAlignment('middle').setWrap(true);
   sh.setColumnWidth(IM_HW_PHOTO_COL, IM_PHOTO_COL_PX);
-  sh.getRange(firstRow_(sh), IM_HW_PHOTO_COL, Math.max(sh.getMaxRows() - firstRow_(sh) + 1, 1), 1).setHorizontalAlignment('center').setVerticalAlignment('middle');
+  cleanPhotoColumn_(sh);
   return true;
+}
+
+/** The inserted column copied Material's dropdown (and any label picked from it). The Photo column holds pictures only: no dropdown, no text. Pictures are never touched. */
+function cleanPhotoColumn_(sh) {
+  const f = firstRow_(sh), n = Math.max(sh.getMaxRows() - f + 1, 1), col = sh.getRange(f, IM_HW_PHOTO_COL, n, 1);
+  col.clearDataValidations().setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.getRange(1, IM_HW_PHOTO_COL, TOP_ROWS, 1).clearDataValidations();
+  col.getValues().forEach(function (r, i) { if (typeof r[0] === 'string' && r[0] !== '') sh.getRange(f + i, IM_HW_PHOTO_COL).clearContent(); });   // text only (a picture is an object)
 }

@@ -91,9 +91,10 @@ function IM_refreshStockStatus_(only) {
 function IM_refreshHardwareNow() {
   IM_refreshReservationStatus(true);
   var n = IM_refreshStockStatus_(null);
-  var ph = 0;
-  try { IM_syncPhotoSheets_(true); ph = IM_fillPhotos_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null, true); } catch (e) { Logger.log('Photos: ' + e.message); }   // pictures are refreshed from IMS here too
-  SpreadsheetApp.getActive().toast('Reservations refreshed from IMS; ' + (n ? 'Stock Status updated on ' + n + ' row(s).' : 'Stock Status already up to date.'), '🔗 Interlink', 5);
+  var ph = 0, phErr = '';
+  try { IM_syncPhotoSheets_(true); ph = IM_fillPhotos_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null, true); phErr = IM_photoProblem_(); } catch (e) { phErr = e.message; }   // pictures are refreshed from IMS here too
+  SpreadsheetApp.getActive().toast('Reservations refreshed from IMS; ' + (n ? 'Stock Status updated on ' + n + ' row(s). ' : 'Stock Status already up to date. ') +
+    (phErr ? 'Item pictures could NOT be copied from IMS: ' + phErr : 'Item pictures: ' + ph + ' placed.'), '🔗 Interlink', phErr ? 20 : 6);
 }
 
 /** Evaluate one Hardware row. Returns a short result line ("skipped: …" when nothing was done). */

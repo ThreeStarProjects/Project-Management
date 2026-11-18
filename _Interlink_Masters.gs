@@ -98,7 +98,10 @@ function IM_installInterlinkMenu() {
 
 function IM_onOpen_() {
   try { ensureTopRows_(); } catch (e) { Logger.log('ensureTopRows_: ' + e.message); }   // the project-filter rows on Hardware List / Purchases / Production, the Hardware Photo column
-  try { IM_syncPhotoSheets_(false); IM_fillPhotos_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null, false); } catch (e) { Logger.log('Photos: ' + e.message); }   // IMS pictures on Hardware List (at most every 6 hours)
+  try {   // IMS pictures on Hardware List (copied at most every 6 hours); if that fails the sheet says why
+    IM_syncPhotoSheets_(false); IM_fillPhotos_(SpreadsheetApp.getActive().getSheetByName(SHEETS.HARDWARE), null, false);
+    var pp = IM_photoProblem_(); if (pp) SpreadsheetApp.getActive().toast('Item pictures from IMS could not be copied: ' + pp, '🔗 Interlink', 20);
+  } catch (e) { SpreadsheetApp.getActive().toast('Item pictures from IMS could not be copied: ' + e.message, '🔗 Interlink', 20); }
   var ui = SpreadsheetApp.getUi();
   ui.createMenu('🔗 Interlink')
     .addItem('➕ Add item to IMS',             'IM_addItemDialog')

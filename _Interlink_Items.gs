@@ -1426,18 +1426,28 @@ function IM_syncPhotoSheets_(force) {
   var ss = SpreadsheetApp.getActive(), props = PropertiesService.getScriptProperties();
   var at = Number(props.getProperty('IM_PHOTOS_AT')) || 0, have = IM_PHOTO_SHEETS.every(function (p) { return !!ss.getSheetByName(p[1]); });
   if (!force && have && Date.now() - at < 6 * 3600 * 1000) return false;
-  var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), done = 0;
+  var ims = SpreadsheetApp.openById(IM_IMS_SHEET_ID), done = 0, errs = [];
   IM_PHOTO_SHEETS.forEach(function (p) {
-    var src = ims.getSheetByName(p[0]); if (!src) return;
-    var copy = src.copyTo(ss).setName(p[1] + '_new');                       // copy first, swap only if it worked
-    if (copy.getMaxColumns() > 2) copy.deleteColumns(3, copy.getMaxColumns() - 2);   // keep Code (A) + Photo (B); the rest were formulas on IMS sheets
-    var last = copy.getLastRow(); if (last >= 1) { var codes = copy.getRange(1, 1, last, 1); codes.setValues(codes.getValues()); }   // codes as plain values (they may be formulas on the IMS sheet)
-    var old = ss.getSheetByName(p[1]); if (old) ss.deleteSheet(old);
-    copy.setName(p[1]); copy.hideSheet(); done++;
+    try {
+      var src = ims.getSheetByName(p[0]); if (!src) { errs.push(p[0] + ' not found in IMS'); return; }
+      var stale = ss.getSheetByName(p[1] + '_new'); if (stale) ss.deleteSheet(stale);   // a half-finished earlier copy
+      var copy = src.copyTo(ss).setName(p[1] + '_new');                       // copy first, swap only if it worked
+      // Only Code (A) + Photo (B) are read. Cutting the rest off just makes the copy lighter, so a failure here (frozen columns on the IMS sheet,
+      // protections) must never stop the swap: the pictures are already in the copy.
+      try { copy.setFrozenColumns(0); copy.setFrozenRows(0); } catch (e1) {}
+      try { if (copy.getMaxColumns() > 2) copy.deleteColumns(3, copy.getMaxColumns() - 2); } catch (e2) { Logger.log('photo copy kept all columns: ' + e2.message); }
+      try { var last = copy.getLastRow(); if (last >= 1) { var codes = copy.getRange(1, 1, last, 1); codes.setValues(codes.getValues()); } } catch (e3) {}   // codes as plain values
+      var old = ss.getSheetByName(p[1]); if (old) ss.deleteSheet(old);
+      copy.setName(p[1]); copy.hideSheet(); done++;
+    } catch (e) { errs.push(p[0] + ': ' + e.message); }
   });
   if (done) props.setProperty('IM_PHOTOS_AT', String(Date.now()));
+  props.setProperty('IM_PHOTOS_ERR', errs.join('; '));   // read by IM_photoProblem_ so the sheet can say why a picture is missing
   return done > 0;
 }
+
+/** '' if the last picture copy from IMS worked, else the reason (shown in a toast; never a silent blank column). */
+function IM_photoProblem_() { return PropertiesService.getScriptProperties().getProperty('IM_PHOTOS_ERR') || ''; }
 
 /** code → { sheet, row } for every item that has a picture in the PM copy. */
 function IM_photoIndex_() {
@@ -1459,6 +1469,7 @@ function IM_fillPhotos_(sh, rows, replace) {
   try {
     var ss = SpreadsheetApp.getActive(), it = ss.getSheetByName(IM_ITEMS_SHEET);
     if (!sh || !it || String(sh.getRange(hdrRow_(sh), IM_HW_PHOTO_COL).getValue()) !== IM_PHOTO_HDR) return 0;   // no Photo column (yet)
+    if (!ss.getSheetByName(IM_PHOTO_SHEETS[0][1])) IM_syncPhotoSheets_(false);                                  // never copied yet: do it now (once)
     var f0 = firstRow_(sh), last = sh.getLastRow(); if (last < f0) return 0;
     var first = rows ? Math.min.apply(null, rows) : f0, end = rows ? Math.max.apply(null, rows) : last, cnt = end - first + 1;
     var codeOf = {}; if (it.getLastRow() >= 2) it.getRange(2, 1, it.getLastRow() - 1, 2).getValues().forEach(function (x) { if (x[1] !== '') codeOf[x[1]] = x[0]; });
