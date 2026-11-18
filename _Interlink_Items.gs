@@ -376,7 +376,12 @@ function IM_fillUnit_(e, sh, t, r) {
                    'other': 'Other' };
     var u = uomMap[String(m[2]).toLowerCase()];
     var cell = sh.getRange(r.getRow(), t.unitCol);
-    if (u && !cell.getValue()) cell.setValue(u);
+    // A Material that REPLACES an earlier one (the cell had a value before) brings its own unit: the old unit belonged to the old item. A first pick
+    // only fills a blank Unit (a unit typed before choosing the material is kept). An IMS unit PM has no name for clears the old unit on a change.
+    var was = e && e.oldValue !== undefined && e.oldValue !== null ? String(e.oldValue) : '';
+    var changed = was !== '' && was !== label;
+    if (u) { if (changed || !cell.getValue()) cell.setValue(u); }
+    else if (changed) cell.clearContent();
   } catch (err) {
     Logger.log('IM_fillUnit_ error: ' + err.message);
   }
