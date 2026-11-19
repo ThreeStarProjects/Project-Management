@@ -12,6 +12,7 @@ function onEditHandler(e) {
     ensureTopRows_();             // a table sheet still in the old layout is moved first, so every row number below is right
     handleProjectFilterEdit_(e);  // the filter dropdown (rows 1-2), or a new row typed while a project is picked
     handleAutoIdGeneration_(e);
+    IM_onProjectsEdit_(e);        // a project typed into the Projects sheet is sent to Masters (and so IMS / Finance / DocGen) right away
     handleHardwareListEdit_(e);
   } catch (err) {
     Logger.log('onEdit error: ' + err.message + '\n' + err.stack);

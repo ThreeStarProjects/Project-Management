@@ -92,6 +92,19 @@ function IM_syncProjectsToMasters_() {
   return out;
 }
 
+/**
+ * onEdit (called from onEditHandler): a project typed straight into the Projects sheet (columns A-H, a data row) is sent to Masters at once,
+ * so IMS / Finance / DocGen learn it without anyone reopening PM. Quiet: never shows UI, never throws.
+ */
+function IM_onProjectsEdit_(e) {
+  try {
+    var sh = e && e.range && e.range.getSheet();
+    if (!sh || sh.getName() !== SHEETS.PROJECTS || e.range.getRow() < 2 || e.range.getColumn() > 8) return;
+    SpreadsheetApp.flush();   // the auto-ID written by the same edit must be visible
+    IM_syncProjectsToMasters_();
+  } catch (err) { Logger.log('IM_onProjectsEdit_: ' + err.message); }
+}
+
 /** Menu / editor: send everything now and say what happened. */
 function IM_pushAllProjectsToMasters() {
   var ui = SpreadsheetApp.getUi();
