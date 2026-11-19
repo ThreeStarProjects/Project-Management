@@ -305,11 +305,15 @@ function IM_syncVendorList_(fresh) {
       } catch (e) {}
     }
   }
-  var props2 = PropertiesService.getDocumentProperties(), sig = names.join('\u0001');
+  var props2 = PropertiesService.getDocumentProperties(), sig = 'v2|' + names.join('\u0001');   // 'v2': re-apply once so the dropdown moves off the Purchases header
   if (fresh || props2.getProperty('IM_vendor_sig') !== sig || res.sheetRemoved) {
     var rule = SpreadsheetApp.newDataValidation().requireValueInList(names, true).setAllowInvalid(true).build();
     [[SHEETS.PURCHASES, 9], [SHEETS.TICKETS, 14]].forEach(function (x) {
-      var sh = ss.getSheetByName(x[0]); if (sh) sh.getRange(2, x[1], Math.max(MAX_ROWS - 1, 1), 1).setDataValidation(rule);
+      var sh = ss.getSheetByName(x[0]); if (sh) {
+        var f0 = firstRow_(sh);   // first DATA row (Purchases has the filter rows above its header)
+        if (f0 > 2) sh.getRange(2, x[1], f0 - 2, 1).clearDataValidations();   // heal: the dropdown must not sit on the header
+        sh.getRange(f0, x[1], Math.max(MAX_ROWS - f0 + 1, 1), 1).setDataValidation(rule);
+      }
     });
     props2.setProperty('IM_vendor_sig', sig); res.changed = true;
   }
