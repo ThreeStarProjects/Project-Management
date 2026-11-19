@@ -755,6 +755,14 @@ function ST_sendCmds_(st, qtys) {
   sh.getRange(start, 1, rows.length, 5).setValues(rows);
   st.cmdFrom = start; st.cmdTo = start + rows.length - 1; ST_save_(st);
 }
+/** Any guarded IMS self-test command(s): [{ action, params }]. */
+function ST_send_(st, cmds) {
+  var ims = ST_ims_(), sh = ims.getSheetByName(ST_CMD);
+  if (!sh) { sh = ims.insertSheet(ST_CMD); sh.getRange(1, 1, 1, 5).setValues([['Id', 'Action', 'Params', 'Status', 'Result']]); sh.hideSheet(); }
+  var start = Math.max(sh.getLastRow(), 1) + 1;
+  sh.getRange(start, 1, cmds.length, 5).setValues(cmds.map(function (c, i) { return ['ST-' + (start + i), c.action, JSON.stringify(c.params), 'Pending', '']; }));
+  st.cmdFrom = start; st.cmdTo = start + cmds.length - 1; ST_save_(st);
+}
 function ST_cmdResults_(st) {
   var sh = ST_ims_().getSheetByName(ST_CMD);
   return sh.getRange(st.cmdFrom, 1, st.cmdTo - st.cmdFrom + 1, 5).getValues();
@@ -764,7 +772,7 @@ function ST_cmdsDone_(st, area) {
   var res = ST_cmdResults_(st);
   if (res.some(function (r) { return r[3] === 'Pending'; })) { st.waitNote = 'IMS has not run the requisition command yet (trigger runs every minute)'; return false; }
   var bad = res.filter(function (r) { return r[3] !== 'Done'; });
-  ST_chk_(area, 'IMS posted the self-test requisition(s) through the real requisition code', bad.length === 0, bad.length ? bad.map(function (r) { return r[4]; }).join('; ') : res.map(function (r) { return r[4]; }).join(', '));
+  ST_chk_(area, 'IMS ran the self-test command(s) through its real code', bad.length === 0, bad.length ? bad.map(function (r) { return r[4]; }).join('; ') : res.map(function (r) { return r[4]; }).join(', '));
   return true;
 }
 
@@ -796,23 +804,59 @@ function ST_req2_(st) {
   return true;
 }
 
+/**
+ * Delivery Challan path (IMS-side code, driven by guarded commands): a reservation is made for the project, a Customer DC sends 2 of the item
+ * as hardware (the DC must CONSUME that reservation), 1 is returned (stock back, reservation stays consumed), and the project's net hardware
+ * (what the IMS views and Finance count) is 1. Phases advance one IMS trigger run each. Uses a manual DC number (no real DC number is used up).
+ */
+function ST_dc_(st) {
+  if (st.skipReq || !st.x) { ST_log_('Delivery Challan', 'DC consumes a reservation, return, net hardware', 'SKIP', 'earlier steps did not finish'); st.skipDc = true; return true; }
+  var A = 'Delivery Challan', rsvRow = function (no) { return ST_regRows_({ label: st.label }).filter(function (x) { return x[1] === no; })[0]; };
+  var dcLines = function () { var dl = ST_ims_().getSheetByName('FG Delivery Lines'); return dl.getRange(2, 1, Math.max(dl.getLastRow() - 1, 1), 10).getValues().filter(function (x) { return x[0] === st.dcNo; }); };
+  if (!st.dcPhase) { ST_send_(st, [{ action: 'reserve', params: { project: st.label, itemCode: st.x.code, qty: 3 } }]); st.dcPhase = 1; ST_save_(st); st.waitNote = 'reservation command sent'; return false; }
+  if (st.dcPhase === 1) {
+    if (!ST_cmdsDone_(st, A)) return false;
+    st.rsvDc = String(ST_cmdResults_(st)[0][4]); var r = rsvRow(st.rsvDc);
+    ST_chk_(A, 'A reservation of 3 for the project is Active before the challan', !!r && r[8] === 'Active' && ST_close_(r[5], 3), r ? r[8] + ' x ' + r[5] : 'not found');
+    ST_send_(st, [{ action: 'dc', params: { project: st.label, itemCode: st.x.code, qty: 2 } }]); st.dcPhase = 2; ST_save_(st); st.waitNote = 'challan command sent'; return false;
+  }
+  if (st.dcPhase === 2) {
+    if (!ST_cmdsDone_(st, A)) return false;
+    st.dcNo = String(ST_cmdResults_(st)[0][4]); var r2 = rsvRow(st.rsvDc), lines = dcLines();
+    var hwl = lines.filter(function (x) { return x[2] === 'Hardware'; })[0];
+    ST_chk_(A, 'The challan holds a Main line and the item as a Hardware line (qty 2)', lines.length === 2 && !!hwl && hwl[3] === st.x.code && ST_close_(hwl[5], 2), lines.length + ' line(s)');
+    st.dcLine = hwl ? hwl[1] : 2;
+    ST_chk_(A, 'Sending 2 on the challan CONSUMED the project reservation: Partially Consumed, Consumed Qty 2, 1 still held', !!r2 && r2[8] === 'Partially Consumed' && ST_close_(r2[14], 2), r2 ? r2[8] + ', consumed ' + r2[14] : 'not found');
+    ST_send_(st, [{ action: 'return', params: { project: st.label, dcNo: st.dcNo, lineNo: st.dcLine, qty: 1 } }, { action: 'dcnet', params: { project: st.label } }]); st.dcPhase = 3; ST_save_(st); st.waitNote = 'return command sent'; return false;
+  }
+  if (!ST_cmdsDone_(st, A)) return false;
+  var res = ST_cmdResults_(st), r3 = rsvRow(st.rsvDc), l2 = dcLines().filter(function (x) { return x[1] === st.dcLine; })[0];
+  ST_chk_(A, 'Return from site: the line shows Returned 1', !!l2 && ST_close_(l2[9], 1), l2 ? 'returned ' + l2[9] : 'line not found');
+  ST_chk_(A, 'A return does not bring the reservation back (still Consumed Qty 2)', !!r3 && ST_close_(r3[14], 2), r3 ? r3[8] + ', consumed ' + r3[14] : 'not found');
+  ST_chk_(A, 'Net hardware counted for the project (project views + Finance) = delivered 2 - returned 1 = 1', ST_close_(res[1][4], 1), 'net = ' + res[1][4]);
+  st.dcNet = 1; ST_save_(st);
+  return true;
+}
+
 function ST_finance_(st) {
   if (st.skipReq) return true;
   var A = 'Finance import', fin = ST_finBook_(), pc = fin.getSheetByName('Project_Costs');
   var key = 'IMS:' + st.id + ':' + st.x.code + '#1';
   var rows = pc.getLastRow() >= 2 ? pc.getRange(2, 1, pc.getLastRow() - 1, 19).getValues().filter(function (r) { return String(r[12]).indexOf('IMS:' + st.id + ':') === 0; }) : [];
   var g = rows.filter(function (r) { return r[12] === key; })[0];
-  if (!g || !ST_close_(g[9], 3)) { st.waitNote = g ? 'cost row has qty ' + g[9] + ' of 3 so far' : 'no cost row yet (Finance import runs every 10 minutes)'; return false; }
-  ST_log_(A, 'Finance imported the requisitions within its trigger interval', 'PASS', '');
-  ST_chk_(A, 'Three requisitions of one item became ONE grouped cost row (qty 3)', rows.length === 1, rows.length + ' cost row(s) for the project');
+  var want = 3 + (st.dcNet || 0);   // 3 requisitions + the net hardware sent on the challan (delivered - returned)
+  if (!g || !ST_close_(g[9], want)) { st.waitNote = g ? 'cost row has qty ' + g[9] + ' of ' + want + ' so far' : 'no cost row yet (Finance import runs every 10 minutes)'; return false; }
+  ST_log_(A, 'Finance imported the requisitions' + (st.dcNet ? ' and the challan hardware' : '') + ' within its trigger interval', 'PASS', '');
+  ST_chk_(A, 'Requisitions' + (st.dcNet ? ' + net challan hardware' : '') + ' of one item became ONE grouped cost row (qty ' + want + ')', rows.length === 1, rows.length + ' cost row(s) for the project');
   ST_chk_(A, 'Cost row project is the PM/Masters label, type Material, Pending, no GST', g[2] === st.label && g[3] === 'Material' && g[13] === 'Pending' && g[17] === '', 'project "' + g[2] + '", ' + g[3] + ', ' + g[13]);
   var fresh = 0, im = ST_ims_().getSheetByName('Item Master'), head = im.getRange(1, 1, 1, im.getLastColumn()).getValues()[0], c = head.indexOf('Avg Rate (Rs.)');
   if (c >= 0) { var rr = im.getRange(2, 1, im.getLastRow() - 1, im.getLastColumn()).getValues().filter(function (x) { return x[0] === st.x.code; })[0]; fresh = rr ? Number(rr[c]) : 0; }
-  ST_chk_(A, 'Cost amount = 3 × the IMS Avg Rate (frozen at import, GST 0)', fresh > 0 && ST_close_(g[7], 3 * fresh, Math.max(0.5, 0.02 * 3 * fresh)), 'amount ' + g[7] + ', 3 × ' + fresh + ' = ' + (3 * fresh));
+  ST_chk_(A, 'Cost amount = ' + want + ' x the IMS Avg Rate (frozen at import, GST 0)', fresh > 0 && ST_close_(g[7], want * fresh, Math.max(0.5, 0.02 * want * fresh)), 'amount ' + g[7] + ', ' + want + ' x ' + fresh + ' = ' + (want * fresh));
   var mp = fin.getSheetByName('M_Project'), mrows = mp && mp.getLastRow() >= 2 ? mp.getRange(2, 1, mp.getLastRow() - 1, 3).getValues().filter(function (r) { return String(r[0]).toUpperCase() === st.id; }) : [];
   ST_chk_(A, 'Project is in Finance\'s project list (code + PM name), so invoices / customers can be attached', mrows.length === 1 && mrows[0][1] === st.name, mrows.length ? mrows[0].join(' | ') : 'not in M_Project');
   var lg = fin.getSheetByName('IMS_Cost_Log'), lrows = lg && lg.getLastRow() >= 2 ? lg.getRange(2, 1, lg.getLastRow() - 1, 11).getValues().filter(function (r) { return r[2] === st.id; }) : [];
-  ST_chk_(A, 'Import log holds the 3 lines with frozen price and group key', lrows.length === 3 && lrows.every(function (r) { return r[10] === 'Imported' && r[9] === key; }), lrows.length + ' line(s)');
+  var nLog = 3 + (st.dcNet ? 1 : 0);
+  ST_chk_(A, 'Import log holds the ' + nLog + ' lines (requisitions' + (st.dcNet ? ' + the challan hardware, key DC:...' : '') + ') with frozen price and group key', lrows.length === nLog && lrows.every(function (r) { return r[10] === 'Imported' && r[9] === key; }), lrows.length + ' line(s)');
   return true;
 }
 
@@ -825,7 +869,7 @@ function ST_cleanup_(st) {
   var total = function (list) { return list.reduce(function (n, x) { return n + (x.n || 0); }, 0); };
   var n = { pm: total(pv.systems.pm), ims: total(pv.systems.ims), fin: total(pv.systems.fin) };
   var summary = 'PM ' + n.pm + ', IMS ' + n.ims + ', Finance ' + n.fin + ' row(s)';
-  if (n.pm > 12 || n.ims > 12 || n.fin > 12) {
+  if (n.pm > 12 || n.ims > 20 || n.fin > 12) {
     ST_log_(A, 'Delete preview is small enough to be only the test data', 'FAIL', summary + ': far more than a self-test creates. NOT deleted. Check ' + st.label + ' by hand.'); st.noClean = true; return true;
   }
   ST_log_(A, 'Delete preview', 'INFO', summary);
@@ -880,6 +924,7 @@ var ST_STEPS_ = [
   { n: 'reservation in IMS', f: ST_waitReservations_, min: 5, fail: function (st) { st.skipDownstream = true; st.skipReq = true; } },
   { n: 'item status', f: ST_waitItemStatus_, min: 6, soft: ST_itemStatusTimeout_ },
   { n: 'requisition 1', f: ST_req1_, min: 5, fail: function (st) { st.skipReq = true; } }, { n: 'requisition 2', f: ST_req2_, min: 5, fail: function (st) { st.skipReq = true; } },
+  { n: 'delivery challan', f: ST_dc_, min: 10, fail: function (st) { st.skipDc = true; } },
   { n: 'finance import', f: ST_finance_, min: 16 },
   { n: 'cleanup', f: ST_cleanup_, min: 3 }, { n: 'verify cleanup', f: ST_verifyCleanup_, min: 3 },
   { n: 'verify stock', f: ST_verifyStock_, min: 5, soft: ST_stockTimeout_ }, { n: 'finish', f: ST_final_, min: 2 }
