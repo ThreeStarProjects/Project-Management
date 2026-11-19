@@ -234,6 +234,7 @@ function IM_syncPeopleFromMasters_(fresh) {
 function IM_syncCustomerList_(fresh) {
   var ss = SpreadsheetApp.getActive(), proj = ss.getSheetByName(SHEETS.PROJECTS);
   if (!proj) return null;
+  try { proj.getRange(2, 3, Math.max(MAX_ROWS - 1, 1), 1).clearDataValidations(); } catch (e) {}   // the Client column is plain typing: no dropdown (removed on request; any old one is cleared here)
   if (fresh) { try { CacheService.getScriptCache().remove(IM_CACHE_KEY + 'customers'); } catch (e) {} }
   var names = [], seen = {};
   (IM_getCustomers() || []).forEach(function (c) {
@@ -252,8 +253,6 @@ function IM_syncCustomerList_(fresh) {
     sh.getRange(2, 1, names.length, 1).setValues(names.map(function (n) { return [n]; }));
     try { sh.getRange('A1').setNote('Generated from Masters (Customers, copied from Finance). Do not type here: rewritten automatically.'); } catch (e) {}
   }
-  var rule = SpreadsheetApp.newDataValidation().requireValueInRange(sh.getRange(2, 1, Math.max(names.length, 1), 1), true).setAllowInvalid(true).build();
-  proj.getRange(2, 3, Math.max(MAX_ROWS - 1, 1), 1).setDataValidation(rule);   // Projects: Client (col C)
   return res;
 }
 
