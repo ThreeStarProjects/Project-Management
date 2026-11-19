@@ -352,18 +352,26 @@ function reseedArrayFormulas_(ss) {
   if (mile) mile.getRange('B2').setFormula(
     `=ARRAYFORMULA(IFERROR(VLOOKUP(A2:A, {${PR}!I:I, ${PR}!B:B}, 2, FALSE), ""))`
   );
+  // Purchases and Production have the project-filter rows above their header, so their seeds live on the FIRST DATA ROW (r), not row 2.
+  // A seed left on row 2 (an older reseed did that) cannot spill past the real seed on row r and shows #REF!, so it is cleared here.
   const pur = ss.getSheetByName(SHEETS.PURCHASES);
-  if (pur) pur.getRange('M2').setFormula(
-    `=ARRAYFORMULA(IF(OR(K2:K="",L2:L=""),"",IFERROR(L2:L-K2:K,"")))`
-  );
+  if (pur) {
+    const r = firstRow_(pur);
+    if (r > 2) clearStaleSeeds_(pur, ['M']);
+    pur.getRange('M' + r).setFormula(
+      `=ARRAYFORMULA(IF(OR(K${r}:K="",L${r}:L=""),"",IFERROR(L${r}:L-K${r}:K,"")))`
+    );
+  }
   const prod = ss.getSheetByName(SHEETS.PRODUCTION);
   if (prod) {
-    prod.getRange('H2').setFormula(
-      `=ARRAYFORMULA(IF(B2:B="","",IFERROR(VLOOKUP(B2:B,{${PR}!I:I,${PR}!F:F},2,FALSE)-1,"")))`
+    const r = firstRow_(prod);
+    if (r > 2) clearStaleSeeds_(prod, ['H', 'J', 'M']);
+    prod.getRange('H' + r).setFormula(
+      `=ARRAYFORMULA(IF(B${r}:B="","",IFERROR(VLOOKUP(B${r}:B,{${PR}!I:I,${PR}!F:F},2,FALSE)-1,"")))`
     );
-    prod.getRange('J2').setFormula(`=ARRAYFORMULA(IF(OR(H2:H="",I2:I=""),"",IFERROR(I2:I-H2:H,"")))`);
-    prod.getRange('M2').setFormula(
-      `=ARRAYFORMULA(IF(A2:A="","",IF(I2:I<>"","Completed",IF(G2:G<>"","In Progress","Not Started"))))`
+    prod.getRange('J' + r).setFormula(`=ARRAYFORMULA(IF(OR(H${r}:H="",I${r}:I=""),"",IFERROR(I${r}:I-H${r}:H,"")))`);
+    prod.getRange('M' + r).setFormula(
+      `=ARRAYFORMULA(IF(A${r}:A="","",IF(I${r}:I<>"","Completed",IF(G${r}:G<>"","In Progress","Not Started"))))`
     );
   }
   const snag = ss.getSheetByName(SHEETS.SNAGS);
@@ -375,6 +383,13 @@ function reseedArrayFormulas_(ss) {
     );
     tkt.getRange('W2').setFormula(`=ARRAYFORMULA(IF(OR(B2:B="",S2:S=""),"",IFERROR(INT(S2:S-B2:B),"")))`);
   }
+}
+
+/** Clear array-formula seeds wrongly sitting on row 2 (the filter rows) of a sheet whose data starts lower. Only cells holding an ARRAYFORMULA are touched. */
+function clearStaleSeeds_(sh, cols) {
+  cols.forEach(function (c) {
+    try { const cell = sh.getRange(c + '2'); if (String(cell.getFormula()).toUpperCase().indexOf('ARRAYFORMULA') >= 0) cell.clearContent(); } catch (e) {}
+  });
 }
 
 /** Public wrapper so users can self-heal dead dropdowns via the menu. */

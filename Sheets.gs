@@ -708,6 +708,14 @@ function ensureTopRows_() {
       if (name === SHEETS.HARDWARE) ensurePhotoColumn_(sh);   // Hardware List only: the IMS photo between Material and Specification
       setupProjectFilter_(sh);
     });
+    // heal: an older reseed left array-formula seeds on row 2 (the filter rows) of Purchases / Production: they show #REF!. Re-seed on the data row.
+    try {
+      const stale = [[SHEETS.PURCHASES, ['M']], [SHEETS.PRODUCTION, ['H', 'J', 'M']]].some(function (x) {
+        const sh = ss.getSheetByName(x[0]);
+        return !!sh && x[1].some(function (c) { return String(sh.getRange(c + '2').getFormula()).toUpperCase().indexOf('ARRAYFORMULA') >= 0; });
+      });
+      if (stale) reseedArrayFormulas_(ss);
+    } catch (e) {}
   } finally { try { lock.releaseLock(); } catch (e) {} }
   if (ready) { try { cache.put(LAYOUT_CACHE_KEY, '1', 21600); } catch (e) {} }
   return moved;
