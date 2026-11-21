@@ -361,15 +361,37 @@ function IM_fillSpec_(sh, rows) {
  * that came from IMS can be picked as well as typed. Runs on open; nothing in a cell is changed.
  */
 function IM_applyUnitList_() {
+  try { IM_backfillUnits_(); } catch (e) { Logger.log('IM_backfillUnits_: ' + e.message); }   // every open: older rows with a blank Unit get their IMS unit
   var props = PropertiesService.getDocumentProperties();
   if (props.getProperty('IM_UOM_LIST') === String(UOM_LIST.length)) return 0;
   var ss = SpreadsheetApp.getActive(), rule = SpreadsheetApp.newDataValidation().requireValueInList(UOM_LIST, true).setAllowInvalid(false).build(), n = 0;
   IM_itemSheets_().forEach(function (t) {
     var sh = ss.getSheetByName(t.name); if (!sh) return;
+    if (t.name === SHEETS.HARDWARE) { try { sh.setColumnWidth(IM_HW_RESERVE_COL, 95); } catch (e) {} }   // the Reserve? header no longer wraps to "Reserv e?"
     var f0 = firstRow_(sh); sh.getRange(f0, t.unitCol, Math.max(Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1), 1), 1).setDataValidation(rule); n++;
   });
   props.setProperty('IM_UOM_LIST', String(UOM_LIST.length));
   return n;
+}
+
+/**
+ * Rows picked before the units were uniform (or typed over) can have a blank Unit although the Material is an IMS item. This fills ONLY blank Unit cells, on the
+ * Hardware List and Purchases, with the item's IMS UOM (the list's spelling). A unit somebody chose is never touched. One read, one write per sheet.
+ */
+function IM_backfillUnits_() {
+  var ss = SpreadsheetApp.getActive(), it = ss.getSheetByName(IM_ITEMS_SHEET); if (!it || it.getLastRow() < 2) return 0;
+  var uom = {};
+  it.getRange(2, 1, it.getLastRow() - 1, 3).getValues().forEach(function (r) {
+    var u = String(r[2] == null ? '' : r[2]).trim(); if (r[1] && u) uom[String(r[1])] = UOM_LIST.filter(function (x) { return x.toLowerCase() === u.toLowerCase(); })[0] || u;
+  });
+  var filled = 0;
+  IM_itemSheets_().forEach(function (t) {
+    var sh = ss.getSheetByName(t.name), f0 = sh ? firstRow_(sh) : 0; if (!sh || sh.getLastRow() < f0) return;
+    var n = sh.getLastRow() - f0 + 1, mat = sh.getRange(f0, IM_MAT_COL, n, 1).getValues(), un = sh.getRange(f0, t.unitCol, n, 1).getValues(), changed = false;
+    mat.forEach(function (r, i) { var u = uom[String(r[0])]; if (u && String(un[i][0]).trim() === '') { un[i][0] = u; changed = true; filled++; } });
+    if (changed) sh.getRange(f0, t.unitCol, n, 1).setValues(un);
+  });
+  return filled;
 }
 
 /** Fill Unit from the picked IMS item's UOM, if the Unit cell is blank. */
