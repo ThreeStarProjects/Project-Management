@@ -429,7 +429,29 @@ function IM_ensureDatePickers_() {
   return fixed;
 }
 
+/**
+ * The Variance (Days) columns, on every open: Purchases = Actual - Expected Delivery, Production = Completion - Target Date, Snags = Resolved - Target Resolve
+ * Date. They are formula columns on the first data row; the cells must be numbers (never formatted as dates) and the header says how to read them. Puts the
+ * formula back when the seed is missing (reseedArrayFormulas_), sets the number format and the header note. Positive = late, negative = early, empty until both
+ * dates are filled. Returns how many columns needed attention.
+ */
+function IM_ensureVarianceColumns_() {
+  var ss = SpreadsheetApp.getActive(), fixed = 0, reseed = false;
+  [[SHEETS.PURCHASES, 'Actual Delivery minus Expected Delivery'], [SHEETS.PRODUCTION, 'Completion Date minus Target Date'], [SHEETS.SNAGS, 'Resolved Date minus Target Resolve Date']].forEach(function (x) {
+    var sh = ss.getSheetByName(x[0]); if (!sh || sh.getLastColumn() < 1) return;
+    var h = hdrRow_(sh), f0 = firstRow_(sh), heads = sh.getRange(h, 1, 1, sh.getLastColumn()).getValues()[0], i = heads.indexOf('Variance (Days)');
+    if (i < 0) return;
+    var col = i + 1, n = Math.max(Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1), 1), seed = sh.getRange(f0, col);
+    if (String(seed.getFormula()).toUpperCase().indexOf('ARRAYFORMULA') < 0) { reseed = true; fixed++; }
+    sh.getRange(f0, col, n, 1).setNumberFormat('0');
+    try { sh.getRange(h, col).setNote('Days late (+) or early (-): ' + x[1] + '. Empty until both dates are filled. Automatic: do not type here.'); } catch (e) {}
+  });
+  if (reseed) reseedArrayFormulas_(ss);
+  return fixed;
+}
+
 function IM_applyUnitList_() {
+  try { IM_ensureVarianceColumns_(); } catch (e) { Logger.log('IM_ensureVarianceColumns_: ' + e.message); }
   try { IM_ensureDatePickers_(); } catch (e) { Logger.log('IM_ensureDatePickers_: ' + e.message); }
   try { IM_migrateHwStock_(); } catch (e) { Logger.log('IM_migrateHwStock_: ' + e.message); }
   try { IM_fixStockFormula_(); } catch (e) { Logger.log('IM_fixStockFormula_: ' + e.message); }
