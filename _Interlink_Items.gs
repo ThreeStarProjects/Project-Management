@@ -86,9 +86,10 @@ function IM_installItems() {
   it.getRange('A2').setFormula(
     '={QUERY(IMPORTRANGE("' + id + '","Item Master!A2:T"),"select Col1,Col20,Col7,Col4 where Col1 is not null",0);' +
     'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:N"),"select Col1,Col14,Col7,Col4 where Col1 is not null",0)}');
-  // Stock: RM = Snapshot Available − Reserved; SFG = SFG Master Available (already net).
+  // Stock: RM = Snapshot Available (col I, ALREADY physical minus reserved; col J is just the reserved figure: subtracting it again counted every reservation twice
+  // and showed -1 for 1 in stock and 1 reserved); SFG = SFG Master Available (already net).
   it.getRange('H2').setFormula(
-    '={QUERY(IMPORTRANGE("' + id + '","Stock Snapshot!A2:J"),"select Col1,Col9-Col10 where Col1 is not null",0);' +
+    '={QUERY(IMPORTRANGE("' + id + '","Stock Snapshot!A2:J"),"select Col1,Col9 where Col1 is not null",0);' +
     'QUERY(IMPORTRANGE("' + id + '","SFG Master!A2:M"),"select Col1,Col13 where Col1 is not null",0)}');
   it.getRange('E2').setFormula('=ARRAYFORMULA(IF(A2:A="","",IFERROR(VLOOKUP(A2:A,H:I,2,FALSE),0)))');
   IM_writeStatusImports_(it);
@@ -360,7 +361,20 @@ function IM_fillSpec_(sh, rows) {
  * One time per sheet (document property IM_UOM_LIST): give the Unit column of the Hardware List and Purchases the common unit list (UOM_LIST), so a unit
  * that came from IMS can be picked as well as typed. Runs on open; nothing in a cell is changed.
  */
+/**
+ * Heals the live hidden _IMS_Items!H2 formula: an earlier version subtracted the reserved quantity from IMS's Available, which already has it taken off, so every
+ * reserved item showed too little stock (1 in stock, 1 reserved -> -1 instead of 0). Runs on every open (a cheap check); does nothing once it is right.
+ */
+function IM_fixStockFormula_() {
+  var it = SpreadsheetApp.getActive().getSheetByName(IM_ITEMS_SHEET); if (!it) return 0;
+  var c = it.getRange('H2'), f = String(c.getFormula());
+  if (f.indexOf('Col9-Col10') < 0) return 0;
+  c.setFormula(f.replace('Col9-Col10', 'Col9'));
+  return 1;
+}
+
 function IM_applyUnitList_() {
+  try { IM_fixStockFormula_(); } catch (e) { Logger.log('IM_fixStockFormula_: ' + e.message); }
   try { IM_backfillUnits_(); } catch (e) { Logger.log('IM_backfillUnits_: ' + e.message); }   // every open: older rows with a blank Unit get their IMS unit
   var props = PropertiesService.getDocumentProperties();
   if (props.getProperty('IM_UOM_LIST') === String(UOM_LIST.length)) return 0;
