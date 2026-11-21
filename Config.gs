@@ -82,6 +82,9 @@ const ID_PREFIX_MAP = {
 
 const MAX_ROWS = 1000;
 
+// The ONE unit list every 3SP system uses (IMS Dropdowns col E, DocGen UNITS, Finance _helpers). Keep identical everywhere.
+const UOM_LIST = ['No.s', 'Pieces', 'Units', 'Sets', 'Pairs', 'Boxes', 'Packets', 'Bundles', 'Rolls', 'Sheets', 'Boards', 'Panels', 'Plates', 'Bars', 'Rods', 'Pipes', 'Tubes', 'Coils', 'Reels', 'Meters', 'Running Feet', 'Square Feet', 'Square Meters', 'Cubic Feet', 'Cubic Meters', 'Kilograms', 'Grams', 'Metric Tons', 'Liters', 'Milliliters', 'Bags', 'Cartons', 'Drums', 'Buckets', 'Cans', 'Bottles', 'Pouches', 'Trays', 'Pallets', 'Containers', 'Loads', 'Lots', 'Hours', 'Days', 'Services', 'Jobs', 'Projects', 'Kits', 'Assemblies', 'Length', 'Weight', 'Volume', 'Area', 'Sq.ft', 'Sq.m', 'Pcs', 'Box', 'Roll', 'Kg', 'Meter', 'Set', 'Other'];
+
 // (Ticketing moved to its own system: 3SP Ticketing.)
 const TICKETING_URL = 'https://script.google.com/macros/s/AKfycbwf8I9DTWuc9pvTzJJXiME1g3J8lIJ6L3UIkyxWsl6h8RA93rhc4PIIhD5-G9f1GA-02A/exec';
 

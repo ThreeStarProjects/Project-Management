@@ -122,6 +122,7 @@ function IM_onOpen_() {
     .addItem('About',                          'IM_about_')
     .addToUi();
   try { IM_removeDuplicateTriggers_(); } catch (e) {}       // a doubled edit trigger would run every edit twice
+  try { IM_applyUnitList_(); } catch (e) {}                 // one time: Unit dropdowns carry the common unit list
   try { retireTicketing_(); } catch (e) {}                  // one time: the old Tickets sheet is gone (ticketing is its own system now)
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
   try {                                                      // the People list (ticket dropdowns) is rewritten from Masters

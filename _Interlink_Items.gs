@@ -356,6 +356,22 @@ function IM_fillSpec_(sh, rows) {
   } catch (err) { Logger.log('IM_fillSpec_ error: ' + err.message); return 0; }
 }
 
+/**
+ * One time per sheet (document property IM_UOM_LIST): give the Unit column of the Hardware List and Purchases the common unit list (UOM_LIST), so a unit
+ * that came from IMS can be picked as well as typed. Runs on open; nothing in a cell is changed.
+ */
+function IM_applyUnitList_() {
+  var props = PropertiesService.getDocumentProperties();
+  if (props.getProperty('IM_UOM_LIST') === String(UOM_LIST.length)) return 0;
+  var ss = SpreadsheetApp.getActive(), rule = SpreadsheetApp.newDataValidation().requireValueInList(UOM_LIST, true).setAllowInvalid(false).build(), n = 0;
+  IM_itemSheets_().forEach(function (t) {
+    var sh = ss.getSheetByName(t.name); if (!sh) return;
+    var f0 = firstRow_(sh); sh.getRange(f0, t.unitCol, Math.max(Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1), 1), 1).setDataValidation(rule); n++;
+  });
+  props.setProperty('IM_UOM_LIST', String(UOM_LIST.length));
+  return n;
+}
+
 /** Fill Unit from the picked IMS item's UOM, if the Unit cell is blank. */
 function IM_fillUnit_(e, sh, t, r) {
   try {
@@ -366,18 +382,12 @@ function IM_fillUnit_(e, sh, t, r) {
     var m = rows.filter(function (x) { return x[1] === label; })[0];
     if (!m) return;  // free-text material
 
-    // IMS UOM → PM Unit dropdown value; unmapped UOMs (e.g. Liters) are left for the user.
-    // IMS also lists PM's own names exactly (see IMS _Interlink_Units.gs), so those map to themselves.
-    var uomMap = { 'no.s': 'Pcs', 'nos': 'Pcs', 'pcs': 'Pcs', 'units': 'Pcs', 'unit': 'Pcs',
-                   'pieces': 'Pcs', 'piece': 'Pcs', 'kilograms': 'Kg', 'kg': 'Kg',
-                   'meters': 'Meter', 'meter': 'Meter', 'sets': 'Set', 'set': 'Set',
-                   'boxes': 'Box', 'box': 'Box', 'rolls': 'Roll', 'roll': 'Roll',
-                   'square feet': 'Sq.ft', 'sq.ft': 'Sq.ft', 'square meters': 'Sq.m', 'sq.m': 'Sq.m',
-                   'other': 'Other' };
-    var u = uomMap[String(m[2]).toLowerCase()];
+    // The unit list is the same in IMS and PM (UOM_LIST), so the IMS UOM is copied exactly. Only the capitalisation is tidied to the list's spelling.
+    var raw = String(m[2] == null ? '' : m[2]).trim();
+    var u = raw ? (UOM_LIST.filter(function (x) { return x.toLowerCase() === raw.toLowerCase(); })[0] || raw) : '';
     var cell = sh.getRange(r.getRow(), t.unitCol);
     // A Material that REPLACES an earlier one (the cell had a value before) brings its own unit: the old unit belonged to the old item. A first pick
-    // only fills a blank Unit (a unit typed before choosing the material is kept). An IMS unit PM has no name for clears the old unit on a change.
+    // only fills a blank Unit (a unit typed before choosing the material is kept). An item with no UOM in IMS clears the old unit on a change.
     var was = e && e.oldValue !== undefined && e.oldValue !== null ? String(e.oldValue) : '';
     var changed = was !== '' && was !== label;
     if (u) { if (changed || !cell.getValue()) cell.setValue(u); }

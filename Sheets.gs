@@ -359,12 +359,12 @@ function installDataValidations() {
 
   // Hardware List
   if (proj) dd(SHEETS.HARDWARE, `B2:B${R}`, proj);
-  dd(SHEETS.HARDWARE, `H2:H${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);   // Unit (H: the Photo column sits at D)
+  dd(SHEETS.HARDWARE, `H2:H${R}`, UOM_LIST);   // Unit (H: the Photo column sits at D)
   dd(SHEETS.HARDWARE, `K2:K${R}`, ['In Stock','Out of Stock']);                                          // Stock Status (K)
 
   // Purchases (Invoice# + Amount removed; PO Issued now Y/N; Variance moved; Status now col M)
   if (proj) dd(SHEETS.PURCHASES, `B2:B${R}`, proj);
-  dd(SHEETS.PURCHASES, `H2:H${R}`, ['Sq.ft','Sq.m','Pcs','Box','Roll','Kg','Meter','Set','Other']);
+  dd(SHEETS.PURCHASES, `H2:H${R}`, UOM_LIST);
   dd(SHEETS.PURCHASES, `J2:J${R}`, ['Yes','No']);
   dd(SHEETS.PURCHASES, `N2:N${R}`, ['Not Ordered','PO Issued','In Transit','Delivered','Rejected','On Hold']);
   date(SHEETS.PURCHASES, `K2:L${R}`);
