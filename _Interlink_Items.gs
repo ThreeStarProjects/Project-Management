@@ -408,7 +408,7 @@ function IM_fixStockFormula_() {
  * Every date column of the table sheets (Projects, Purchases, Production, Snags) offers the calendar on double-click: a column is a date column when its
  * header says Date or Delivery (Start Date, Handover Date, Expected / Actual Delivery, Completion Date, QC Date, Raised / Target Resolve / Resolved Date).
  * A "valid date" rule is what makes Google Sheets show the picker; it is put back wherever it is missing (a script-written column, a rebuilt sheet, a pasted
- * range). Formula columns (Target Date) are skipped, existing dates are untouched, wrong text is still allowed (warning only). Returns the columns repaired.
+ * range). Array-formula columns are skipped, existing dates are untouched, wrong text is still allowed (warning only). Returns the columns repaired.
  */
 function IM_ensureDatePickers_() {
   var ss = SpreadsheetApp.getActive(), fixed = 0;
@@ -421,7 +421,7 @@ function IM_ensureDatePickers_() {
     heads.forEach(function (t, i) {
       t = String(t); if (!/date|delivery/i.test(t) || /variance|status|days|delay/i.test(t)) return;
       var col = i + 1, probe = sh.getRange(f0, col), dv = probe.getDataValidation();
-      if (probe.getFormula && String(probe.getFormula()).charAt(0) === '=') return;           // a formula column (Target Date) is not typed into
+      if (probe.getFormula && String(probe.getFormula()).toUpperCase().indexOf('ARRAYFORMULA') >= 0) return;   // an automatic column is not typed into (Target Date is per-row: it gets the calendar)
       if (dv && dv.getCriteriaType() === isDate) return;                                      // already offers the calendar
       sh.getRange(f0, col, n, 1).setDataValidation(rule); fixed++;
     });
@@ -450,7 +450,42 @@ function IM_ensureVarianceColumns_() {
   return fixed;
 }
 
+/**
+ * Production Target Date = the project's Handover Date - 1, unless someone picks a date by hand. One formula per row (not an array seed) so a date typed or
+ * picked in a cell simply replaces its formula. On every open: the old array seed is removed, and every EMPTY cell gets the formula (a typed date is never
+ * touched; clearing a cell goes back to automatic at the next open). Manual dates are shaded light blue; the header note says how it works. Returns cells filled.
+ */
+function IM_prodTargetFormula_(r) {
+  return '=IF($B' + r + '="","",IFERROR(VLOOKUP($B' + r + ',{' + SHEETS.PROJECTS + '!$I:$I,' + SHEETS.PROJECTS + '!$F:$F},2,FALSE)-1,""))';
+}
+function IM_ensureProdTarget_() {
+  var sh = SpreadsheetApp.getActive().getSheetByName(SHEETS.PRODUCTION); if (!sh || sh.getLastColumn() < 1) return 0;
+  var h = hdrRow_(sh), f0 = firstRow_(sh), heads = sh.getRange(h, 1, 1, sh.getLastColumn()).getValues()[0], i = heads.indexOf('Target Date');
+  if (i < 0) return 0;
+  var col = i + 1, n = Math.max(Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1), 1), fixed = 0;
+  [2, f0].forEach(function (r) {   // the old array seed (row 2 on the oldest layout, the first data row on the later one) would block the per-row formulas
+    var c = sh.getRange(r, col); if (String(c.getFormula()).toUpperCase().indexOf('ARRAYFORMULA') >= 0) c.clearContent();
+  });
+  var rng = sh.getRange(f0, col, n, 1), fs = rng.getFormulas(), vs = rng.getValues(), out = [], changed = false;
+  for (var k = 0; k < n; k++) {
+    if (!fs[k][0] && (vs[k][0] === '' || vs[k][0] === null)) { out.push([IM_prodTargetFormula_(f0 + k)]); changed = true; fixed++; }
+    else out.push([fs[k][0] || vs[k][0]]);
+  }
+  if (changed) rng.setValues(out);   // setValues reads '=...' as a formula and keeps typed dates as dates
+  try { sh.getRange(h, col).setNote('Automatic: the project\'s Handover Date minus 1 day. To set your own date, double-click the cell and pick one (it turns light blue). To go back to automatic, clear the cell; it refills when the sheet is next opened.'); } catch (e) {}
+  try {   // light blue = a manual date (the cell is not a formula)
+    var L = sh.getRange(f0, col).getA1Notation().replace(/\d+/, ''), cond = '=AND($' + L + f0 + '<>"",NOT(ISFORMULA($' + L + f0 + ')))', rules = sh.getConditionalFormatRules();
+    var has = rules.some(function (x) { var b = x.getBooleanCondition && x.getBooleanCondition(); return b && String(b.getCriteriaValues()[0]) === cond; });
+    if (!has) {
+      rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(cond).setBackground('#cfe2f3').setRanges([sh.getRange(f0, col, n, 1)]).build());
+      sh.setConditionalFormatRules(rules);
+    }
+  } catch (e) {}
+  return fixed;
+}
+
 function IM_applyUnitList_() {
+  try { IM_ensureProdTarget_(); } catch (e) { Logger.log('IM_ensureProdTarget_: ' + e.message); }
   try { IM_ensureVarianceColumns_(); } catch (e) { Logger.log('IM_ensureVarianceColumns_: ' + e.message); }
   try { IM_ensureDatePickers_(); } catch (e) { Logger.log('IM_ensureDatePickers_: ' + e.message); }
   try { IM_migrateHwStock_(); } catch (e) { Logger.log('IM_migrateHwStock_: ' + e.message); }

@@ -178,10 +178,7 @@ function createProductionSheet_(ss) {
   sh.setFrozenRows(1);
 
   const PR = SHEETS.PROJECTS;
-  // Target Date = Projects.HandoverDate - 1 for this project (lookup by Label).
-  sh.getRange('H2').setFormula(
-    `=ARRAYFORMULA(IF(B2:B="","",IFERROR(VLOOKUP(B2:B,{${PR}!I:I,${PR}!F:F},2,FALSE)-1,"")))`
-  );
+  // Target Date = Projects.HandoverDate - 1 for this project: one formula per row, filled on open by IM_ensureProdTarget_ (a manual date replaces it).
   // Variance = Completion - Target
   sh.getRange('J2').setFormula(
     `=ARRAYFORMULA(IF(OR(H2:H="",I2:I=""),"",IFERROR(I2:I-H2:H,"")))`
@@ -627,7 +624,7 @@ function ensureTopRows_() {
     });
     // heal: an older reseed left array-formula seeds on row 2 (the filter rows) of Purchases / Production: they show #REF!. Re-seed on the data row.
     try {
-      const stale = [[SHEETS.PURCHASES, ['M']], [SHEETS.PRODUCTION, ['H', 'J', 'M']]].some(function (x) {
+      const stale = [[SHEETS.PURCHASES, ['M']], [SHEETS.PRODUCTION, ['J', 'M']]].some(function (x) {
         const sh = ss.getSheetByName(x[0]);
         return !!sh && x[1].some(function (c) { return String(sh.getRange(c + '2').getFormula()).toUpperCase().indexOf('ARRAYFORMULA') >= 0; });
       });

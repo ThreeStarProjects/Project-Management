@@ -357,10 +357,8 @@ function reseedArrayFormulas_(ss) {
   const prod = ss.getSheetByName(SHEETS.PRODUCTION);
   if (prod) {
     const r = firstRow_(prod);
-    if (r > 2) clearStaleSeeds_(prod, ['H', 'J', 'M']);
-    prod.getRange('H' + r).setFormula(
-      `=ARRAYFORMULA(IF(B${r}:B="","",IFERROR(VLOOKUP(B${r}:B,{${PR}!I:I,${PR}!F:F},2,FALSE)-1,"")))`
-    );
+    if (r > 2) clearStaleSeeds_(prod, ['J', 'M']);
+    // Target Date (H) is NOT an array seed: it is one formula per row (IM_ensureProdTarget_) so a date picked by hand can replace it.
     prod.getRange('J' + r).setFormula(`=ARRAYFORMULA(IF(OR(H${r}:H="",I${r}:I=""),"",IFERROR(I${r}:I-H${r}:H,"")))`);
     prod.getRange('M' + r).setFormula(
       `=ARRAYFORMULA(IF(A${r}:A="","",IF(I${r}:I<>"","Completed",IF(G${r}:G<>"","In Progress","Not Started"))))`
