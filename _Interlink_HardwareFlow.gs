@@ -177,7 +177,7 @@ function IM_verifyPurchasePush() {
         check(c.name + ': nothing pushed', code === null && pur.getRange(prow, 1).getValue() === '');
       } else {
         var p = pur.getRange(prow, 1, 1, 15).getValues()[0];
-        check(c.name + ': Purchases Required = Ordered = ' + c.expect, !!code && p[4] === c.expect && p[6] === c.expect);
+        check(c.name + ': Purchases Required = ' + c.expect + ', Ordered Qty left empty for the buyer', !!code && p[4] === c.expect && p[6] === '');
         check(c.name + ': row mapped (project, material, unit, PO No, Not Ordered)',
               p[1] === 'PRJ-TEST' && p[2] === c.mat && p[7] === 'Pcs' && p[9] === 'No' && p[13] === 'Not Ordered');
         check(c.name + ': remark names HW-TEST' + (c.expect !== c.qty ? ' and the shortfall' : ''),

@@ -116,7 +116,9 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   purSheet.getRange(newRow, 3).setValue(material);
   purSheet.getRange(newRow, 4).setValue(spec || '');
   purSheet.getRange(newRow, 5).setValue(need || '');
-  purSheet.getRange(newRow, 7).setValue(need || '');  // Ordered defaults to Required
+  // G Ordered Qty is left EMPTY on purpose: it, the Vendor, dates and the rest are filled by hand when the order is placed.
+  // F In Stock (IMS) is a live formula; make sure this row has it (it is the IMS Available of the material, read from IMS).
+  if (typeof IM_stockFormula_ === 'function') purSheet.getRange(newRow, IM_STOCK_COL).setFormula(IM_stockFormula_(newRow));
   purSheet.getRange(newRow, 8).setValue(unit || '');
   purSheet.getRange(newRow, 10).setValue('No');      // PO Issued default
   purSheet.getRange(newRow, 14).setValue('Not Ordered');

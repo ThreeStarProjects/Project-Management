@@ -688,7 +688,7 @@ function ST_reserve_(st) {
     if (/^PUR-\d+$/.test(pc)) {
       st.b.pur = pc; ST_save_(st);
       var pr = findRowByValue_(pur, 1, pc), p = pr ? pur.getRange(pr, 1, 1, 15).getValues()[0] : null;
-      ST_chk_(A, 'Purchases row: project, material, Required = Ordered = shortfall 5, "Not Ordered"', !!p && p[1] === st.label && p[2] === st.z.label && p[4] === 5 && p[6] === 5 && p[13] === 'Not Ordered', p ? JSON.stringify(p.slice(0, 8)) + ' status ' + p[13] : 'no Purchases row ' + pc);
+      ST_chk_(A, 'Purchases row: project, material, Required = shortfall 5, Ordered Qty left empty, "Not Ordered"', !!p && p[1] === st.label && p[2] === st.z.label && p[4] === 5 && p[6] === '' && p[13] === 'Not Ordered', p ? JSON.stringify(p.slice(0, 8)) + ' status ' + p[13] : 'no Purchases row ' + pc);
     }
   }
   var rc = tick(st.c);
