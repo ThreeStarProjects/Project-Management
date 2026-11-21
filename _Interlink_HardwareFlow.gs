@@ -110,7 +110,7 @@ function IM_autoEvaluateHardwareRow_(sh, row) {
     if (!hwId || !project || !material || !(req > 0)) return 'skipped: needs Project, Material and Required Qty';
     if (pushed) return 'skipped: already sent to Purchases (' + pushed + ')';
     if (k && k.charAt(0) !== '⚠') return 'skipped: reservation already requested (' + k.split(' | ')[0] + ')';
-    if (typeof stock !== 'number') return 'skipped: not an IMS item';   // (a reserved row shows "Reserved n" there: it was skipped above)
+    if (typeof stock !== 'number') return 'skipped: not an IMS item';   // (a reserved or used row shows "Reserved n" / "Used n" there: it was skipped above)
 
     var d = IM_decideHardwareRow_(req, stock);
     if (d.reserveQty > 0) {  // queue first: if IMS is unreachable we stop before touching Status

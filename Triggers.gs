@@ -92,7 +92,7 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   // Free-text materials (F = "n/a"/blank) and rows without a numeric Required Qty push as before.
   let need = qty;
   const req = Number(qty);
-  const isIms = typeof inStock === 'number' || /^Reserved\b/.test(String(inStock));   // a reserved row shows "Reserved n" in place of the number
+  const isIms = typeof inStock === 'number' || /^(Reserved|Used)\b/.test(String(inStock));   // a reserved / used row shows "Reserved n" / "Used n" in place of the number
   if (req > 0 && isIms) {
     const toast = msg => SpreadsheetApp.getActive().toast(msg, 'Hardware List', 8);
     const m = /(?:pending \| |reserved |partially consumed )([\d.]+)/.exec(String(rsv || ''));

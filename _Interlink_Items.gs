@@ -143,9 +143,9 @@ function IM_stockFormula_(r) {
 
 /**
  * Hardware List In Stock (IMS): the same, except that while the row's reservation HOLDS stock (IMS status Active / Partially Consumed) the cell shows
- * "Reserved <qty still held>": the project's own quantity, which does not move when other projects reserve or goods arrive. A row that is not reserved, or
- * whose reservation was consumed or released, shows the live free stock again. Reads the same hidden imports as Item Status (K:M by request id, O:R by
- * reservation no: status, qty, consumed qty).
+ * "Reserved <qty still held>" (and "(used n)" once part of it was used): the project's own quantity, which does not move when other projects reserve or goods
+ * arrive. A fully consumed reservation (or one released after some use) shows "Used <qty>". A row that is not reserved, or whose reservation was released
+ * unused, shows the live free stock. Reads the same hidden imports as Item Status (K:M by request id, O:R by reservation no: status, qty, consumed qty).
  */
 function IM_hwStockFormula_(r) {
   var I = IM_ITEMS_SHEET;
@@ -153,20 +153,22 @@ function IM_hwStockFormula_(r) {
     'reqId,IFERROR(REGEXEXTRACT(resvRaw,"^PMR-\\w+"),""),' +
     'rsvNo,IFERROR(REGEXEXTRACT(resvRaw,"^RSV-\\d+"),IF(reqId="","",IFERROR(VLOOKUP(reqId,' + I + '!$K:$M,2,FALSE),""))),' +
     'regStat,IF(rsvNo="","",IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,2,FALSE),"")),' +
-    'held,IF(rsvNo="",0,IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,3,FALSE)+0,0)-IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,4,FALSE)+0,0)),' +
-    'IF(AND(OR(regStat="Active",regStat="Partially Consumed"),held>0),"Reserved "&held,live)))';
+    'used,IF(rsvNo="",0,IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,4,FALSE)+0,0)),' +
+    'held,IF(rsvNo="",0,IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,3,FALSE)+0,0)-used),' +
+    'IF(AND(OR(regStat="Active",regStat="Partially Consumed"),held>0),"Reserved "&held&IF(used>0," (used "&used&")",""),' +
+      'IF(AND(OR(regStat="Consumed",regStat="Released"),used>0),"Used "&used,live))))';
 }
 
 /** One time (document property IM_HW_STOCK): put the reserved-quantity formula into the Hardware List In Stock column. Runs on open. */
 function IM_migrateHwStock_() {
   var props = PropertiesService.getDocumentProperties();
-  if (props.getProperty('IM_HW_STOCK') === 'v1') return 0;
+  if (props.getProperty('IM_HW_STOCK') === 'v2') return 0;
   var ss = SpreadsheetApp.getActive(), hw = ss.getSheetByName(SHEETS.HARDWARE);
   if (!hw || String(hw.getRange(hdrRow_(hw), IM_HW_STOCK_COL).getValue()) !== IM_STOCK_HDR) return 0;
   var f0 = firstRow_(hw), nr = Math.min(MAX_ROWS - 1, hw.getMaxRows() - f0 + 1), f = [];
   for (var r = f0; r < f0 + nr; r++) f.push([IM_hwStockFormula_(r)]);
   hw.getRange(f0, IM_HW_STOCK_COL, nr, 1).setFormulas(f);
-  props.setProperty('IM_HW_STOCK', 'v1');
+  props.setProperty('IM_HW_STOCK', 'v2');
   return nr;
 }
 
