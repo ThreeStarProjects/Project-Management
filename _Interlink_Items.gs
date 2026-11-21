@@ -404,7 +404,33 @@ function IM_fixStockFormula_() {
   return 1;
 }
 
+/**
+ * Every date column of the table sheets (Projects, Purchases, Production, Snags) offers the calendar on double-click: a column is a date column when its
+ * header says Date or Delivery (Start Date, Handover Date, Expected / Actual Delivery, Completion Date, QC Date, Raised / Target Resolve / Resolved Date).
+ * A "valid date" rule is what makes Google Sheets show the picker; it is put back wherever it is missing (a script-written column, a rebuilt sheet, a pasted
+ * range). Formula columns (Target Date) are skipped, existing dates are untouched, wrong text is still allowed (warning only). Returns the columns repaired.
+ */
+function IM_ensureDatePickers_() {
+  var ss = SpreadsheetApp.getActive(), fixed = 0;
+  var rule = SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(true).build();
+  var isDate = SpreadsheetApp.DataValidationCriteria.DATE_IS_VALID_DATE;
+  [SHEETS.PROJECTS, SHEETS.PURCHASES, SHEETS.PRODUCTION, SHEETS.SNAGS].forEach(function (name) {
+    var sh = ss.getSheetByName(name); if (!sh) return;
+    var h = hdrRow_(sh), f0 = firstRow_(sh), lastCol = sh.getLastColumn(); if (lastCol < 1) return;
+    var heads = sh.getRange(h, 1, 1, lastCol).getValues()[0], n = Math.max(Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1), 1);
+    heads.forEach(function (t, i) {
+      t = String(t); if (!/date|delivery/i.test(t) || /variance|status|days|delay/i.test(t)) return;
+      var col = i + 1, probe = sh.getRange(f0, col), dv = probe.getDataValidation();
+      if (probe.getFormula && String(probe.getFormula()).charAt(0) === '=') return;           // a formula column (Target Date) is not typed into
+      if (dv && dv.getCriteriaType() === isDate) return;                                      // already offers the calendar
+      sh.getRange(f0, col, n, 1).setDataValidation(rule); fixed++;
+    });
+  });
+  return fixed;
+}
+
 function IM_applyUnitList_() {
+  try { IM_ensureDatePickers_(); } catch (e) { Logger.log('IM_ensureDatePickers_: ' + e.message); }
   try { IM_migrateHwStock_(); } catch (e) { Logger.log('IM_migrateHwStock_: ' + e.message); }
   try { IM_fixStockFormula_(); } catch (e) { Logger.log('IM_fixStockFormula_: ' + e.message); }
   try { IM_backfillUnits_(); } catch (e) { Logger.log('IM_backfillUnits_: ' + e.message); }   // every open: older rows with a blank Unit get their IMS unit
