@@ -122,6 +122,7 @@ function IM_onOpen_() {
     .addItem('About',                          'IM_about_')
     .addToUi();
   try { IM_removeDuplicateTriggers_(); } catch (e) {}       // a doubled edit trigger would run every edit twice
+  try { retireTicketing_(); } catch (e) {}                  // one time: the old Tickets sheet is gone (ticketing is its own system now)
   try { IM_syncProjectsToMasters_(); } catch (e) {}         // a project added or renamed in PM reaches Masters (and IMS / Finance)
   try {                                                      // the People list (ticket dropdowns) is rewritten from Masters
     var pr = IM_syncPeopleFromMasters_();
@@ -307,7 +308,7 @@ function IM_syncVendorList_(fresh) {
   var props2 = PropertiesService.getDocumentProperties(), sig = 'v2|' + names.join('\u0001');   // 'v2': re-apply once so the dropdown moves off the Purchases header
   if (fresh || props2.getProperty('IM_vendor_sig') !== sig || res.sheetRemoved) {
     var rule = SpreadsheetApp.newDataValidation().requireValueInList(names, true).setAllowInvalid(true).build();
-    [[SHEETS.PURCHASES, 9], [SHEETS.TICKETS, 14]].forEach(function (x) {
+    [[SHEETS.PURCHASES, 9]].forEach(function (x) {
       var sh = ss.getSheetByName(x[0]); if (sh) {
         var f0 = firstRow_(sh);   // first DATA row (Purchases has the filter rows above its header)
         if (f0 > 2) sh.getRange(2, x[1], f0 - 2, 1).clearDataValidations();   // heal: the dropdown must not sit on the header

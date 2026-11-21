@@ -2,7 +2,7 @@
  * ============================================================================
  * 3SP PROJECT MANAGEMENT — Menu
  * Custom "🏗 Interior PM" menu + the admin actions it exposes: Add Project,
- * Raise Ticket (opens Index.html modal), Open Project View, Delete Project,
+ * Open Project View, Delete Project,
  * and setup/maintenance utilities.
  * ============================================================================
  */
@@ -11,7 +11,6 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('🏗 Interior PM')
     .addItem('➕ Add Project', 'menuAddProject')
-    .addItem('🎫 Raise Ticket', 'menuRaiseTicket')
     .addSeparator()
     .addItem('📋 Open Project View', 'menuOpenProjectView')
     .addItem('🗑 Delete Project', 'menuDeleteProject')
@@ -62,13 +61,6 @@ function addProject_(name) {
   proj.getRange(row, 2).setValue(name);
   proj.getRange(row, 7).setValue('In Progress');  // col G Overall Status (shifted after Owner/Contract removed)
   return id;
-}
-
-function menuRaiseTicket() {
-  SpreadsheetApp.getUi().showModalDialog(
-    HtmlService.createHtmlOutputFromFile('Index').setWidth(720).setHeight(720),
-    '🎫 Raise a Ticket'
-  );
 }
 
 function menuOpenProjectView() {
@@ -376,13 +368,6 @@ function reseedArrayFormulas_(ss) {
   }
   const snag = ss.getSheetByName(SHEETS.SNAGS);
   if (snag) snag.getRange('K2').setFormula(`=ARRAYFORMULA(IF(OR(I2:I="",J2:J=""),"",IFERROR(J2:J-I2:I,"")))`);
-  const tkt = ss.getSheetByName(SHEETS.TICKETS);
-  if (tkt) {
-    tkt.getRange('V2').setFormula(
-      `=ARRAYFORMULA(IF(A2:A="","",IF(OR(I2:I="Resolved",I2:I="Closed"),"Done",IF(J2:J="","",IF(J2:J<TODAY(),"Overdue",IF(J2:J-TODAY()<=1,"Due Soon","On Track"))))))`
-    );
-    tkt.getRange('W2').setFormula(`=ARRAYFORMULA(IF(OR(B2:B="",S2:S=""),"",IFERROR(INT(S2:S-B2:B),"")))`);
-  }
 }
 
 /** Clear array-formula seeds wrongly sitting on row 2 (the filter rows) of a sheet whose data starts lower. Only cells holding an ARRAYFORMULA are touched. */

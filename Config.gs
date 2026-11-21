@@ -15,7 +15,6 @@ const SHEETS = {
   PURCHASES:  'Purchases',
   PRODUCTION: 'Production',
   SNAGS:      'Snags',
-  TICKETS:    'Tickets',
   // Reference
   PEOPLE:     'People',
   VENDORS:    'Vendors',
@@ -78,37 +77,13 @@ const ID_PREFIX_MAP = {
   [SHEETS.HARDWARE]:   'HW',
   [SHEETS.PURCHASES]:  'PUR',
   [SHEETS.PRODUCTION]: 'PROD',
-  [SHEETS.SNAGS]:      'SNAG',
-  [SHEETS.TICKETS]:    'TKT'
+  [SHEETS.SNAGS]:      'SNAG'
 };
 
 const MAX_ROWS = 1000;
 
-// ── TICKET CONFIG ──────────────────────────────────────────────────────────
-const TICKET_CATEGORIES = {
-  'Machine Breakdown':          { priority: 'High',     dueDays: 1, fields: ['machineId'] },
-  'Material Shortage':          { priority: 'High',     dueDays: 2, fields: ['batchCode','relatedProject'] },
-  'Quality Defect (In-Process)':{ priority: 'High',     dueDays: 1, fields: ['batchCode','relatedProject'] },
-  'Design Change Request':      { priority: 'Medium',   dueDays: 3, fields: ['drawingRev','relatedProject'] },
-  'Sample/Mockup Approval':     { priority: 'Medium',   dueDays: 5, fields: ['drawingRev','relatedProject'] },
-  'Technical Query':            { priority: 'Medium',   dueDays: 2, fields: ['drawingRev','relatedProject'] },
-  'Vendor Issue':               { priority: 'Medium',   dueDays: 3, fields: ['vendorName','amount'] },
-  'Purchase Request':           { priority: 'Medium',   dueDays: 3, fields: ['vendorName','amount','relatedProject'] },
-  'Site Issue':                 { priority: 'High',     dueDays: 1, fields: ['relatedProject'] },
-  'Installation Snag':          { priority: 'Medium',   dueDays: 3, fields: ['relatedProject'] },
-  'Delivery Coordination':      { priority: 'Medium',   dueDays: 2, fields: ['relatedProject'] },
-  'Client Complaint':           { priority: 'High',     dueDays: 1, fields: ['relatedProject'] },
-  'Client Change Request':      { priority: 'Medium',   dueDays: 5, fields: ['amount','relatedProject'] },
-  'Warranty Claim':             { priority: 'Medium',   dueDays: 5, fields: ['relatedProject'] },
-  'HR / Leave':                 { priority: 'Low',      dueDays: 3, fields: [] },
-  'Safety Incident':            { priority: 'Critical', dueDays: 0, fields: ['machineId'] },
-  'General Admin':              { priority: 'Low',      dueDays: 5, fields: [] },
-  'Payment Issue':              { priority: 'Medium',   dueDays: 3, fields: ['amount','relatedProject'] },
-  'Expense Reimbursement':      { priority: 'Low',      dueDays: 5, fields: ['amount'] }
-};
-const TICKET_STATUSES   = ['Open','In Progress','On Hold','Resolved','Closed'];
-const TICKET_PRIORITIES = ['Low','Medium','High','Critical'];
-const TICKET_IMPACTS    = ['Low','Medium','High','Critical'];
+// (Ticketing moved to its own system: 3SP Ticketing.)
+const TICKETING_URL = 'https://script.google.com/macros/s/AKfycbwf8I9DTWuc9pvTzJJXiME1g3J8lIJ6L3UIkyxWsl6h8RA93rhc4PIIhD5-G9f1GA-02A/exec';
 
 // ── COLORS (gamified / bold) ───────────────────────────────────────────────
 // Headers deep indigo, section bands electric purple. Status cells are

@@ -221,50 +221,6 @@ function createSnagsSheet_(ss) {
   sh.setColumnWidth(1, 90); sh.setColumnWidth(2, 200); sh.setColumnWidth(3, 260);
 }
 
-function createTicketsSheet_(ss) {
-  const sh = ss.insertSheet(SHEETS.TICKETS);
-  const headers = [
-    'Ticket ID',        // A  auto TKT-###
-    'Raised Date',      // B
-    'Raised By',        // C  dropdown from People
-    'Category',         // D  dropdown of 19 categories
-    'Subject',          // E
-    'Description',      // F
-    'Priority',         // G
-    'Assigned To',      // H  dropdown from People (required)
-    'Status',           // I
-    'Due Date',         // J
-    'Related Project',  // K  dropdown from Projects
-    'Machine/Equip ID', // L
-    'Batch/Product',    // M
-    'Vendor Name',      // N  dropdown from Vendors
-    'Drawing Rev',      // O
-    'Amount (₹)',       // P
-    'Impact',           // Q
-    'Resolution Notes', // R
-    'Resolved Date',    // S
-    'Closed Date',      // T
-    'Remarks',          // U
-    'Overdue Flag',     // V  ARRAYFORMULA On Track / Due Soon / Overdue / Done
-    'TAT (Days)'        // W  ARRAYFORMULA Resolved - Raised
-  ];
-  sh.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-  sh.setFrozenRows(1);
-  sh.setFrozenColumns(1);
-
-  sh.getRange('V2').setFormula(
-    `=ARRAYFORMULA(IF(A2:A="","",IF(OR(I2:I="Resolved",I2:I="Closed"),"Done",IF(J2:J="","",IF(J2:J<TODAY(),"Overdue",IF(J2:J-TODAY()<=1,"Due Soon","On Track"))))))`
-  );
-  sh.getRange('W2').setFormula(`=ARRAYFORMULA(IF(OR(B2:B="",S2:S=""),"",IFERROR(INT(S2:S-B2:B),"")))`);
-
-  sh.getRange('B:B').setNumberFormat('dd/mm/yyyy');
-  sh.getRange('J:J').setNumberFormat('dd/mm/yyyy');
-  sh.getRange('S:T').setNumberFormat('dd/mm/yyyy');
-  sh.getRange('P:P').setNumberFormat('₹#,##,##0');
-  sh.getRange('W:W').setNumberFormat('0');
-  sh.setColumnWidth(1, 90); sh.setColumnWidth(5, 260); sh.setColumnWidth(6, 300);
-}
-
 function createProjectViewSheet_(ss) {
   const sh = ss.insertSheet(SHEETS.VIEW);
   sh.setColumnWidth(1, 170); sh.setColumnWidth(2, 240);
@@ -297,8 +253,7 @@ function createProjectViewSheet_(ss) {
     ['── COUNTS (per project) ──', '', '', '', ''],
     ['Purchases:',    `=COUNTIF('${SHEETS.PURCHASES}'!B:B,$B$3)`,  '', 'Delivered:', `=COUNTIFS('${SHEETS.PURCHASES}'!B:B,$B$3,'${SHEETS.PURCHASES}'!N:N,"Delivered")`],
     ['Production Items:', `=COUNTIF('${SHEETS.PRODUCTION}'!B:B,$B$3)`, '', 'Completed:', `=COUNTIFS('${SHEETS.PRODUCTION}'!B:B,$B$3,'${SHEETS.PRODUCTION}'!M:M,"Completed")`],
-    ['Snags Total:',  `=COUNTIF('${SHEETS.SNAGS}'!B:B,$B$3)`,      '', 'Snags Open:',  `=COUNTIFS('${SHEETS.SNAGS}'!B:B,$B$3,'${SHEETS.SNAGS}'!G:G,"Open")`],
-    ['Tickets Total:',`=COUNTIF('${SHEETS.TICKETS}'!K:K,$B$3)`,    '', 'Tickets Open:',`=COUNTIFS('${SHEETS.TICKETS}'!K:K,$B$3,'${SHEETS.TICKETS}'!I:I,"Open")`]
+    ['Snags Total:',  `=COUNTIF('${SHEETS.SNAGS}'!B:B,$B$3)`,      '', 'Snags Open:',  `=COUNTIFS('${SHEETS.SNAGS}'!B:B,$B$3,'${SHEETS.SNAGS}'!G:G,"Open")`]
   ];
   sh.getRange(5, 1, layout.length, 5).setValues(layout);
 
@@ -333,7 +288,7 @@ function createDashboardSheet_(ss) {
   const sh = ss.insertSheet(SHEETS.DASHBOARD);
   sh.getRange('A1').setValue('3SP DASHBOARD').setFontWeight('bold').setFontSize(14);
 
-  const PR = SHEETS.PROJECTS, TK = SHEETS.TICKETS, SN = SHEETS.SNAGS;
+  const PR = SHEETS.PROJECTS, SN = SHEETS.SNAGS;
 
   // KPI stack (rows 2-14) + one report (rows 16-36)
   const kpi = [
@@ -345,9 +300,9 @@ function createDashboardSheet_(ss) {
     ['Overdue Projects',  `=COUNTIF('${PR}'!J:J,"Overdue")`],
     ['Avg Completion %',  `=IFERROR(AVERAGE('${PR}'!Q2:Q${MAX_ROWS}),0)`],
     ['', ''],
-    ['TICKETS & SNAGS', ''],
-    ['Open Tickets',    `=COUNTIF('${TK}'!I:I,"Open")`],
-    ['Overdue Tickets', `=COUNTIF('${TK}'!V:V,"Overdue")`],
+    ['SNAGS', ''],
+    ['', ''],
+    ['', ''],
     ['Open Snags',      `=COUNTIF('${SN}'!G:G,"Open")`],
     ['Resolved Snags',  `=COUNTIF('${SN}'!G:G,"Resolved")`]
   ];
@@ -429,18 +384,6 @@ function installDataValidations() {
   dd(SHEETS.SNAGS, `G2:G${R}`, ['Open','In Progress','Resolved']);
   date(SHEETS.SNAGS, `H2:J${R}`);
 
-  // Tickets (unchanged)
-  if (ppl) dd(SHEETS.TICKETS, `C2:C${R}`, ppl);
-  dd(SHEETS.TICKETS, `D2:D${R}`, Object.keys(TICKET_CATEGORIES));
-  dd(SHEETS.TICKETS, `G2:G${R}`, TICKET_PRIORITIES);
-  if (ppl) dd(SHEETS.TICKETS, `H2:H${R}`, ppl);
-  dd(SHEETS.TICKETS, `I2:I${R}`, TICKET_STATUSES);
-  if (proj) dd(SHEETS.TICKETS, `K2:K${R}`, proj);
-  dd(SHEETS.TICKETS, `Q2:Q${R}`, TICKET_IMPACTS);
-  date(SHEETS.TICKETS, `B2:B${R}`);
-  date(SHEETS.TICKETS, `J2:J${R}`);
-  date(SHEETS.TICKETS, `S2:T${R}`);
-
   // Project View selector
   const view = ss.getSheetByName(SHEETS.VIEW);
   if (view && proj) view.getRange('B3').setDataValidation(
@@ -480,7 +423,6 @@ function installFormatting() {
   base(SHEETS.PURCHASES,  15);
   base(SHEETS.PRODUCTION, 14);
   base(SHEETS.SNAGS,      13);
-  base(SHEETS.TICKETS,    23);
   base(SHEETS.PEOPLE,     5);
 
   formatDashboard_(ss);
@@ -500,7 +442,7 @@ function formatDashboard_(ss) {
     .setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
   sh.setRowHeight(1, 44);
 
-  // Section header rows: PROJECT HEALTH (3), TICKETS & SNAGS (10), REPORT (16)
+  // Section header rows: PROJECT HEALTH (3), SNAGS (10), REPORT (16)
   [3, 10, 16].forEach(r => {
     sh.getRange(r, 1, 1, 6).merge()
       .setBackground(COLORS.SECTION_BG).setFontColor(COLORS.HEADER_FG)
@@ -513,7 +455,6 @@ function formatDashboard_(ss) {
   sh.getRange('B4:B14').setFontSize(13).setFontWeight('bold').setHorizontalAlignment('right');
   sh.getRange('B8').setNumberFormat('0.0%');          // Avg Completion
   sh.getRange('B7').setFontColor(COLORS.DANGER);      // Overdue Projects
-  sh.getRange('B12').setFontColor(COLORS.DANGER);     // Overdue Tickets
 }
 
 function formatProjectView_(ss) {
@@ -622,29 +563,6 @@ function applyAllCF_(ss) {
       ['Open',        COLORS.WARN_BG,     COLORS.WARN_FG]
     ])
   ]);
-  // Tickets: Priority (G), Status (I), Overdue Flag (V)
-  sh = ss.getSheetByName(SHEETS.TICKETS);
-  if (sh) sh.setConditionalFormatRules([
-    ...cfRules_(sh.getRange(`G2:G${R}`), [
-      ['Critical', COLORS.BAD_BG,     COLORS.BAD_FG],
-      ['High',     COLORS.WARN_BG,    COLORS.WARN_FG],
-      ['Medium',   COLORS.PROGRESS_BG,COLORS.PROGRESS_FG],
-      ['Low',      COLORS.DONE_BG,    COLORS.DONE_FG]
-    ]),
-    ...cfRules_(sh.getRange(`I2:I${R}`), [
-      ['Resolved',    COLORS.DONE_BG,     COLORS.DONE_FG],
-      ['Closed',      COLORS.DONE_BG,     COLORS.DONE_FG],
-      ['In Progress', COLORS.PROGRESS_BG, COLORS.PROGRESS_FG],
-      ['On Hold',     COLORS.WARN_BG,     COLORS.WARN_FG],
-      ['Open',        COLORS.WARN_BG,     COLORS.WARN_FG]
-    ]),
-    ...cfRules_(sh.getRange(`V2:V${R}`), [
-      ['Overdue',  COLORS.BAD_BG,      COLORS.BAD_FG],
-      ['Due Soon', COLORS.WARN_BG,     COLORS.WARN_FG],
-      ['On Track', COLORS.DONE_BG,     COLORS.DONE_FG],
-      ['Done',     COLORS.PENDING_BG,  COLORS.PENDING_FG]
-    ])
-  ]);
 }
 
 /**
@@ -659,8 +577,7 @@ function applyProjectColorBands_(ss) {
     [SHEETS.HARDWARE,   'B', 'N'],
     [SHEETS.PURCHASES,  'B', 'O'],  // O (15) after In Stock (IMS) was added
     [SHEETS.PRODUCTION, 'B', 'N'],
-    [SHEETS.SNAGS,      'B', 'M'],
-    [SHEETS.TICKETS,    'K', 'W']   // K = Related Project
+    [SHEETS.SNAGS,      'B', 'M']
   ];
   const R = MAX_ROWS;
   targets.forEach(([sheetName, projCol, lastCol]) => {

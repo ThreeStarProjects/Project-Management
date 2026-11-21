@@ -40,14 +40,13 @@ function setupSheets() {
   createPurchasesSheet_(ss);
   createProductionSheet_(ss);
   createSnagsSheet_(ss);
-  createTicketsSheet_(ss);
   createProjectViewSheet_(ss);
   createDashboardSheet_(ss);
 
   // Reorder tabs for a sensible left-to-right flow
   const order = [SHEETS.PROJECTS, SHEETS.VIEW, SHEETS.DASHBOARD, SHEETS.MILESTONES,
                  SHEETS.HARDWARE, SHEETS.PURCHASES, SHEETS.PRODUCTION,
-                 SHEETS.SNAGS, SHEETS.TICKETS, SHEETS.PEOPLE];
+                 SHEETS.SNAGS, SHEETS.PEOPLE];
   order.forEach((name, i) => {
     const sh = ss.getSheetByName(name);
     if (sh) { ss.setActiveSheet(sh); ss.moveActiveSheet(i + 1); }
