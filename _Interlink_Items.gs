@@ -116,7 +116,7 @@ function IM_installItems() {
 
     // F: one plain formula per row (survives row deletes and the Purchases import)
     var f = [], f0 = firstRow_(sh), nr = Math.min(MAX_ROWS - 1, sh.getMaxRows() - f0 + 1);
-    for (var r = f0; r < f0 + nr; r++) f.push([IM_stockFormula_(r)]);
+    for (var r = f0; r < f0 + nr; r++) f.push([(t.name === SHEETS.HARDWARE ? IM_hwStockFormula_ : IM_stockFormula_)(r)]);
     sh.getRange(f0, t.stockCol, nr, 1).setFormulas(f).setHorizontalAlignment('center');
     sh.getRange(f0, IM_MAT_COL, nr, 1).setDataValidation(rule);
   });
@@ -136,9 +136,38 @@ function IM_installItems() {
           'click A2 and press "Allow access". Then run IM_verifyWiring().');
 }
 
-/** In Stock (IMS) formula for one row: item stock for IMS items, "n/a" for free text, blank if no material. */
+/** In Stock (IMS) formula for one row: item stock for IMS items, "n/a" for free text, blank if no material. (Purchases.) */
 function IM_stockFormula_(r) {
   return '=IF($C' + r + '="","",IFERROR(VLOOKUP($C' + r + ',' + IM_ITEMS_SHEET + '!$B:$E,4,FALSE),"n/a"))';
+}
+
+/**
+ * Hardware List In Stock (IMS): the same, except that while the row's reservation HOLDS stock (IMS status Active / Partially Consumed) the cell shows
+ * "Reserved <qty still held>": the project's own quantity, which does not move when other projects reserve or goods arrive. A row that is not reserved, or
+ * whose reservation was consumed or released, shows the live free stock again. Reads the same hidden imports as Item Status (K:M by request id, O:R by
+ * reservation no: status, qty, consumed qty).
+ */
+function IM_hwStockFormula_(r) {
+  var I = IM_ITEMS_SHEET;
+  return '=IF($C' + r + '="","",LET(live,IFERROR(VLOOKUP($C' + r + ',' + I + '!$B:$E,4,FALSE),"n/a"),resvRaw,$N' + r + ',' +
+    'reqId,IFERROR(REGEXEXTRACT(resvRaw,"^PMR-\\w+"),""),' +
+    'rsvNo,IFERROR(REGEXEXTRACT(resvRaw,"^RSV-\\d+"),IF(reqId="","",IFERROR(VLOOKUP(reqId,' + I + '!$K:$M,2,FALSE),""))),' +
+    'regStat,IF(rsvNo="","",IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,2,FALSE),"")),' +
+    'held,IF(rsvNo="",0,IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,3,FALSE)+0,0)-IFERROR(VLOOKUP(rsvNo,' + I + '!$O:$R,4,FALSE)+0,0)),' +
+    'IF(AND(OR(regStat="Active",regStat="Partially Consumed"),held>0),"Reserved "&held,live)))';
+}
+
+/** One time (document property IM_HW_STOCK): put the reserved-quantity formula into the Hardware List In Stock column. Runs on open. */
+function IM_migrateHwStock_() {
+  var props = PropertiesService.getDocumentProperties();
+  if (props.getProperty('IM_HW_STOCK') === 'v1') return 0;
+  var ss = SpreadsheetApp.getActive(), hw = ss.getSheetByName(SHEETS.HARDWARE);
+  if (!hw || String(hw.getRange(hdrRow_(hw), IM_HW_STOCK_COL).getValue()) !== IM_STOCK_HDR) return 0;
+  var f0 = firstRow_(hw), nr = Math.min(MAX_ROWS - 1, hw.getMaxRows() - f0 + 1), f = [];
+  for (var r = f0; r < f0 + nr; r++) f.push([IM_hwStockFormula_(r)]);
+  hw.getRange(f0, IM_HW_STOCK_COL, nr, 1).setFormulas(f);
+  props.setProperty('IM_HW_STOCK', 'v1');
+  return nr;
 }
 
 /**
@@ -374,6 +403,7 @@ function IM_fixStockFormula_() {
 }
 
 function IM_applyUnitList_() {
+  try { IM_migrateHwStock_(); } catch (e) { Logger.log('IM_migrateHwStock_: ' + e.message); }
   try { IM_fixStockFormula_(); } catch (e) { Logger.log('IM_fixStockFormula_: ' + e.message); }
   try { IM_backfillUnits_(); } catch (e) { Logger.log('IM_backfillUnits_: ' + e.message); }   // every open: older rows with a blank Unit get their IMS unit
   var props = PropertiesService.getDocumentProperties();
@@ -534,7 +564,7 @@ function IM_verifyItemStatus() {
   var hr = firstEmptyRow_(hw, 1), pr = firstEmptyRow_(pur, 1);
   var reset = function () {
     hw.getRange(hr, IM_HW_PUSHED_COL, 1, 2).clearContent();   // L, M
-    hw.getRange(hr, IM_HW_STOCK_COL).setFormula(IM_stockFormula_(hr));
+    hw.getRange(hr, IM_HW_STOCK_COL).setFormula(IM_hwStockFormula_(hr));
     pur.getRange(pr, 1).clearContent(); pur.getRange(pr, 14).clearContent();  // A ID, N Status
   };
   try {
@@ -1440,7 +1470,7 @@ function IM_installHelpNotes_() {
   if (!hw) return 0;
   var notes = [
     [IM_HW_PHOTO_COL, IM_PHOTO_HDR, 'The item\'s picture from IMS (copied in by itself when you pick the Material; blank if the item has no picture in IMS or is free text).'],
-    [IM_HW_STOCK_COL, IM_STOCK_HDR, 'Free stock in IMS: what is in stock minus what is already reserved. "n/a" means this material is not an IMS item. Automatic: do not type here.'],
+    [IM_HW_STOCK_COL, IM_STOCK_HDR, 'Free stock in IMS: what is in stock minus what is already reserved. Once this row is reserved it shows "Reserved <qty>" (this project\'s own quantity, which does not move) until the reservation is consumed or released. "n/a" means this material is not an IMS item. Automatic: do not type here.'],
     [IM_HW_RESERVE_COL, IM_RESERVE_HDR, 'Tick to reserve this row in IMS. What exists is reserved; anything missing goes to Purchases. IMS confirms within about a minute. Ticking again does nothing.'],
     [IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR, 'Where this item is now: Not Reserved, Reserving…, Reserved, Partially Consumed, Consumed, Released, plus To order / Ordered / Delivered from Purchases. Automatic. A ⚠ means IMS refused: the reason is in this cell\'s note.'],
     [IM_HW_STATUS_COL, IM_STOCKSTATUS_HDR, 'In Stock or Out of Stock. Fills itself from IMS until you tick Reserve?. You can still choose by hand; setting Out of Stock sends the row to Purchases.'],
@@ -1465,7 +1495,7 @@ function IM_healFormulaColumns_() {
     f.forEach(function (r, i) { if (!r[0] || String(r[0]).charAt(0) !== '=') { out.push([make(i + f0)]); changed = true; fixed++; } else out.push([r[0]]); });
     if (changed) sh.getRange(f0, col, nr, 1).setFormulas(out);
   };
-  heal(ss.getSheetByName(SHEETS.HARDWARE), IM_HW_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
+  heal(ss.getSheetByName(SHEETS.HARDWARE), IM_HW_STOCK_COL, IM_STOCK_HDR, IM_hwStockFormula_);
   heal(ss.getSheetByName(SHEETS.HARDWARE), IM_HW_ITEMSTATUS_COL, IM_ITEMSTATUS_HDR, IM_itemStatusFormula_);
   heal(ss.getSheetByName(SHEETS.PURCHASES), IM_STOCK_COL, IM_STOCK_HDR, IM_stockFormula_);
   return fixed;

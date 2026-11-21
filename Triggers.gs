@@ -92,13 +92,14 @@ function pushHardwareItemToPurchases_(hwSheet, hwRow, purSheet) {
   // Free-text materials (F = "n/a"/blank) and rows without a numeric Required Qty push as before.
   let need = qty;
   const req = Number(qty);
-  if (req > 0 && typeof inStock === 'number') {
+  const isIms = typeof inStock === 'number' || /^Reserved\b/.test(String(inStock));   // a reserved row shows "Reserved n" in place of the number
+  if (req > 0 && isIms) {
     const toast = msg => SpreadsheetApp.getActive().toast(msg, 'Hardware List', 8);
     const m = /(?:pending \| |reserved |partially consumed )([\d.]+)/.exec(String(rsv || ''));
     if (m) {
       need = Math.round((req - Number(m[1])) * 1000) / 1000;
       if (need <= 0) { toast(hwId + ': fully reserved from IMS stock — nothing to purchase.'); return null; }
-    } else if (inStock > 0) {
+    } else if (typeof inStock === 'number' && inStock > 0) {
       toast(hwId + ': IMS has ' + inStock + ' in stock. Tick Reserve? on this row first, then set Stock Status to Out of Stock again.');
       return null;
     }

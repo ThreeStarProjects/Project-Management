@@ -108,9 +108,9 @@ function IM_autoEvaluateHardwareRow_(sh, row) {
         pushed = v[IM_HW_PUSHED_COL - 1], k = String(v[IM_HW_RSV_COL - 1] || '');
 
     if (!hwId || !project || !material || !(req > 0)) return 'skipped: needs Project, Material and Required Qty';
-    if (typeof stock !== 'number') return 'skipped: not an IMS item';
     if (pushed) return 'skipped: already sent to Purchases (' + pushed + ')';
     if (k && k.charAt(0) !== '⚠') return 'skipped: reservation already requested (' + k.split(' | ')[0] + ')';
+    if (typeof stock !== 'number') return 'skipped: not an IMS item';   // (a reserved row shows "Reserved n" there: it was skipped above)
 
     var d = IM_decideHardwareRow_(req, stock);
     if (d.reserveQty > 0) {  // queue first: if IMS is unreachable we stop before touching Status
@@ -159,7 +159,7 @@ function IM_verifyPurchasePush() {
   var r = firstEmptyRow_(hw, 1);
   var reset = function () {
     HW_COLS.forEach(function (c) { hw.getRange(r, c).clearContent(); });
-    hw.getRange(r, IM_HW_STOCK_COL).setFormula(IM_stockFormula_(r));
+    hw.getRange(r, IM_HW_STOCK_COL).setFormula(IM_hwStockFormula_(r));
   };
   try {
     cases.forEach(function (c) {
